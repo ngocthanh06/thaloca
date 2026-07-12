@@ -1,0 +1,210 @@
+// Overview: a project-centric summary derived live from Overview() on every
+// refresh (desktop/app.go). Nothing here is persisted or configured by the
+// user — auto-grouping and anomaly detection both happen server-side.
+//
+// The Runtime/Source summary lines and Recent activity list below are
+// derived entirely from data the app already loaded for the Runtime view
+// and the (hidden) Activity dashboard — no extra backend call is made here,
+// so Overview never triggers a second Docker/process/git scan.
+import type { OverviewResult, ProjectGroup, Anomaly, Service, PortUsage, Job, ActivitySummary } from '../api'
+import { escapeHTML, getStatusClass, formatDate } from '../dom'
+import { openServiceInspector } from '../components/serviceInspector'
+
+export interface OverviewContext {
+  services: Service[]
+  ports: PortUsage[]
+  jobs: Job[]
+  activity: ActivitySummary | null
+}
+
+export function renderOverviewView(data: OverviewResult | null, ctx: OverviewContext): void {
+  const container = document.getElementById('overview-view')
+  if (!container) return
+
+  if (!data || data.projects.length === 0) {
+    container.innerHTML = `<div class="empty">Scanning your development environment…</div>`
+    return
+  }
+
+  const anomaliesHTML = data.anomalies.length
+    ? `<div class="anomaly-strip">${data.anomalies.map(renderAnomaly).join('')}</div>`
+    : `<div class="anomaly-strip empty-strip">No active incidents — everything looks healthy.</div>`
+
+  const projects = sortProjectsByAttention(data.projects)
+
+  container.innerHTML = `
+    <p class="subview-desc">Needs-attention projects first, then everything else — grouped live from Docker Compose, processes, and Git repositories. Nothing here is saved, it is rescanned on every refresh.</p>
+    <div class="overview-summary-row">
+      ${renderRuntimeSummary(ctx.services, ctx.ports, ctx.jobs)}
+      ${renderSourceSummary(ctx.activity)}
+    </div>
+    ${anomaliesHTML}
+    <div class="overview-grid">${projects.map(project => renderProjectCard(project, ctx.ports, ctx.jobs)).join('')}</div>
+    ${renderRecentActivity(ctx.activity)}
+  `
+
+  container.querySelectorAll<HTMLElement>('[data-overview-service]').forEach(el => {
+    el.addEventListener('click', () => {
+      const service = findService(data.projects, el.dataset.overviewService || '')
+      if (service) openServiceInspector(service)
+    })
+  })
+
+  container.querySelectorAll<HTMLElement>('[data-overview-more]').forEach(el => {
+    el.addEventListener('click', () => {
+      toggleOverviewProjectExpanded(el.dataset.overviewMore || '')
+      renderOverviewView(data, ctx)
+    })
+  })
+}
+
+function renderRuntimeSummary(services: Service[], ports: PortUsage[], jobs: Job[]): string {
+  const dockerAll = services.filter(s => s.source === 'docker')
+  const running = dockerAll.filter(s => s.status !== 'stopped').length
+  const processes = services.filter(s => s.source === 'process').length
+  return `
+    <article class="overview-summary-card">
+      <span class="overview-summary-title">Runtime</span>
+      <p>${running}/${dockerAll.length} containers · ${processes} processes · ${ports.length} ports · ${jobs.length} jobs</p>
+    </article>`
+}
+
+function renderSourceSummary(activity: ActivitySummary | null): string {
+  if (!activity) {
+    return `
+      <article class="overview-summary-card">
+        <span class="overview-summary-title">Source Control</span>
+        <p>Loading git activity…</p>
+      </article>`
+  }
+  const dirty = activity.repositories.filter(r => !r.ignored && (r.changed_files > 0 || r.staged_files > 0)).length
+  const parts = [`${dirty} ${dirty === 1 ? 'repository' : 'repositories'} changed`]
+  if (activity.ahead) parts.push(`${activity.ahead} ahead`)
+  if (activity.behind) parts.push(`${activity.behind} behind`)
+  return `
+    <article class="overview-summary-card">
+      <span class="overview-summary-title">Source Control</span>
+      <p>${parts.join(' · ')}</p>
+    </article>`
+}
+
+interface RecentEntry {
+  at: string
+  text: string
+}
+
+// Merge the two Git activity feeds (commits and hook events) into one
+// recency-sorted list. Both are already loaded for the Activity dashboard.
+function renderRecentActivity(activity: ActivitySummary | null): string {
+  if (!activity || (activity.commits.length === 0 && activity.events.length === 0)) return ''
+
+  const entries: RecentEntry[] = [
+    ...activity.commits.map(c => ({ at: c.occurred_at, text: `Commit ${c.hash.slice(0, 7)} in ${c.repo_name}: ${c.subject}` })),
+    ...activity.events.map(e => ({ at: e.occurred_at, text: `${e.event} in ${e.repo_name}${e.subject ? ': ' + e.subject : ''}` })),
+  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8)
+
+  if (entries.length === 0) return ''
+
+  return `
+    <h3 class="section-title">Recent activity</h3>
+    <div class="overview-recent">
+      ${entries.map(e => `
+        <div class="overview-recent-row">
+          <span class="overview-recent-time">${escapeHTML(formatDate(e.at))}</span>
+          <span>${escapeHTML(e.text)}</span>
+        </div>`).join('')}
+    </div>`
+}
+
+function findService(projects: ProjectGroup[], id: string): Service | undefined {
+  for (const project of projects) {
+    const found = project.services.find(s => s.id === id)
+    if (found) return found
+  }
+  return undefined
+}
+
+function renderAnomaly(a: Anomaly): string {
+  // Log-based anomalies link straight to the offending service's logs
+  // (Service Inspector already has a Logs toggle for docker services) —
+  // other anomaly kinds (restart loop, degraded) don't carry a log tail.
+  const clickable = a.kind === 'log_error'
+  return `
+    <div class="anomaly-row severity-${escapeHTML(a.severity)}${clickable ? ' anomaly-row-clickable' : ''}" ${clickable ? `data-overview-service="${escapeHTML(a.service_id)}"` : ''}>
+      <span class="anomaly-dot"></span>
+      <div>
+        <strong>${escapeHTML(a.name)}</strong>
+        <span class="anomaly-project">${escapeHTML(a.project)}</span>
+        <p>${escapeHTML(a.message)}</p>
+      </div>
+      ${clickable ? '<span class="anomaly-link-hint">View logs →</span>' : ''}
+    </div>`
+}
+
+// projectOrUnassigned mirrors projectOrUnassigned in desktop/overview.go so
+// ports/jobs without a project label land in the same "Unassigned" bucket
+// the backend already grouped services into.
+function projectOrUnassigned(project: string | undefined): string {
+  return project && project.trim() !== '' ? project : 'Unassigned'
+}
+
+// Which project cards have been expanded past the initial 4 services —
+// purely a display preference, reset on app restart like everything else
+// in Overview.
+const expandedOverviewProjects = new Set<string>()
+
+function toggleOverviewProjectExpanded(name: string): void {
+  if (expandedOverviewProjects.has(name)) expandedOverviewProjects.delete(name)
+  else expandedOverviewProjects.add(name)
+}
+
+// "Needs attention" ordering: projects with something actually down sort
+// first, then degraded, then fully healthy ones — Unassigned (not a real
+// project, just a catch-all) always sorts last regardless of health.
+// Array.prototype.sort is stable, so ties keep the backend's own
+// (alphabetical) order.
+function sortProjectsByAttention(projects: ProjectGroup[]): ProjectGroup[] {
+  const rank = (p: ProjectGroup): number => {
+    if (p.name === 'Unassigned') return 3
+    if (p.down > 0) return 0
+    if (p.degraded > 0) return 1
+    return 2
+  }
+  return [...projects].sort((a, b) => rank(a) - rank(b))
+}
+
+function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs: Job[]): string {
+  const expanded = expandedOverviewProjects.has(project.name)
+  const visible = expanded ? project.services : project.services.slice(0, 4)
+  const hiddenCount = project.services.length - visible.length
+  const overall = project.total > 0 && project.healthy === project.total ? 'healthy' : project.down > 0 ? 'critical' : 'warning'
+  const portCount = allPorts.filter(p => projectOrUnassigned(p.project) === project.name).length
+  const jobCount = allJobs.filter(j => projectOrUnassigned(j.project) === project.name).length
+  return `
+    <article class="overview-card overview-card-${overall}">
+      <header>
+        <strong>${escapeHTML(project.name)}</strong>
+        <span class="overview-badge">${project.healthy}/${project.total} healthy</span>
+      </header>
+      ${project.degraded || project.down || portCount || jobCount ? `
+        <div class="overview-summary">
+          ${project.degraded ? `<span class="chip warning">${project.degraded} degraded</span>` : ''}
+          ${project.down ? `<span class="chip critical">${project.down} down</span>` : ''}
+          ${portCount ? `<span class="chip">${portCount} ${portCount === 1 ? 'port' : 'ports'}</span>` : ''}
+          ${jobCount ? `<span class="chip">${jobCount} ${jobCount === 1 ? 'job' : 'jobs'}</span>` : ''}
+        </div>` : ''}
+      <div class="overview-services">
+        ${visible.map(s => `
+          <button class="overview-service-row" data-overview-service="${escapeHTML(s.id)}">
+            <span class="status-dot ${getStatusClass(s.status)}"></span>
+            <span class="overview-service-name">${escapeHTML(s.name)}</span>
+            <span class="overview-service-ports">${(s.ports || []).map(p => ':' + p).join(' ')}</span>
+          </button>`).join('')}
+        ${hiddenCount > 0
+          ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">+${hiddenCount} more</button>`
+          : expanded && project.services.length > 4
+            ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">Show less</button>`
+            : ''}
+      </div>
+    </article>`
+}

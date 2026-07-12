@@ -1,0 +1,41 @@
+/thaloca
+/cmd/thaloca/thaloca
+/desktop/desktop
+
+# Landing page lives in its own separate project/folder, not part of the
+# Thaloca app itself.
+/landing-page/
+
+# Other unrelated local projects/tooling caches that happen to live under
+# this same directory — not part of Thaloca.
+/website/
+/.pnpm-store/
+
+# Local runtime data (reserved for later milestones).
+/.thaloca/
+**/.thaloca/
+/desktop/frontend/node_modules/
+/desktop/frontend/dist/
+/desktop/frontend/test-results/
+/desktop/frontend/playwright-report/
+/desktop/build/bin/
+
+# Secrets: none of these should ever be needed in the repo — Thaloca itself
+# only ever stores paths to keys (~/.thaloca/servers.json, outside the repo)
+# and reads credentials from macOS Keychain, never from a file here. These
+# rules exist so an accidental copy/paste into the working tree can't be
+# committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Editor/OS noise.
+.DS_Store
+.vscode/
+.idea/
