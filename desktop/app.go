@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -156,8 +157,37 @@ func NewApp() *App {
 	return &App{}
 }
 
+// fixPathForGUILaunch replaces PATH with the user's actual login-shell PATH.
+// Asking the shell itself (rather than hardcoding candidate directories)
+// picks up Homebrew on both Intel (/usr/local/bin) and Apple Silicon
+// (/opt/homebrew/bin), version managers, and anything else the user's shell
+// profile adds. Bounded by a timeout in case a shell profile hangs or
+// prompts for input — PATH is simply left as-is if that happens.
+func fixPathForGUILaunch() {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, shell, "-ilc", `echo -n "$PATH"`).Output()
+	if err != nil {
+		return
+	}
+	if path := strings.TrimSpace(string(out)); path != "" {
+		os.Setenv("PATH", path)
+	}
+}
+
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// A GUI app launched from Finder/Dock (as opposed to `wails dev` from a
+	// terminal) is started by launchd with a minimal PATH that omits
+	// /usr/local/bin, /opt/homebrew/bin, etc. — so `docker`, `git`, `brew`
+	// and every other tool this app shells out to silently fail to resolve,
+	// even though they're installed. Fix PATH before anything below runs.
+	fixPathForGUILaunch()
 
 	// Warm the GPU info cache in the background so the first visit to the
 	// Resources tab doesn't pay system_profiler's ~200ms cost itself.
