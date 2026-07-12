@@ -45,11 +45,35 @@ CLI commands still exist for debugging and automation, but they are intentionall
 - Closing the window hides it rather than quitting Thaloca — it keeps scanning in the background; click the Dock icon to bring the window back, or quit fully with Cmd+Q or the Dock icon's own Quit. A real macOS menu bar icon was attempted (`energye/systray`) but caused a genuine crash: it and Wails' own Cocoa run loop both require the main thread, and no reliable way to reconcile that was found for this Wails version, so it was not pursued further.
 - A fullscreen toggle button sits in the header next to the search box (uses Wails' own window-fullscreen APIs, the same native fullscreen the green traffic-light button already provides).
 - Add Server's form now has labeled fields, a safety notice reiterating that only the key's path is stored, and a native file-picker "Browse…" button for the key path instead of typing it by hand.
+- Docker container logs are scanned periodically (throttled to at most once per container per 30s) for panics/OOM/fatal errors (alerted on first occurrence) and repeated generic error/timeout lines (alerted once they repeat 3+ times in one scan). Findings show up in Overview's anomaly strip and link straight to that container's logs in the Service Inspector. Each distinct error signature (normalized to ignore timestamps/IDs) only alerts once, not on every scan.
+- Native macOS notifications fire for containers stuck restarting, failed health checks, errored jobs, and disconnected servers (server reachability is polled in the background every 3 minutes, independent of the Servers tab being open). Each event type can be toggled independently, with optional quiet hours (including ranges that cross midnight) — all from the gear icon in the header. The same panel has a "possible memory leak" warning based on a two-half-average comparison of the last 30 minutes of memory history (robust to normal oscillation, not just endpoint comparison).
+- Resources has a History section: CPU/Memory/Disk/Network sampled once a minute in the background (so a real 24h history exists whenever the tab is opened, not just while it's open), shown as hand-drawn SVG sparklines with a hover crosshair + tooltip and a 15m/1h/24h range toggle.
+- When starting or restarting a container fails because Docker reports its port is already taken by something else, a port-conflict assistant looks up who currently holds that port (from data already loaded) and offers to stop it or copy the equivalent command.
+- The gear icon's Settings panel also has Export/Import for servers, ignored/pinned repos, and notification settings as one JSON file (via native save/open dialogs) — useful when moving to a new machine. Servers only ever contain a key file path, never its contents, so nothing needs redacting.
+- Cmd+K opens a global command palette: jump to any tab, open a service inspector, restart/stop a running container, open a repo in Source Control, or check/open a terminal to a saved server — all fuzzy-searchable by name.
+- Everything copied — via an explicit Copy button inside Thaloca, a manual Cmd+C selection inside the app, or copied in **any other app on the Mac** (a background poller watches the system pasteboard) — is recorded in a copy history panel (clipboard icon in the header), auto-expiring after 24h or deletable by hand. This is opt-in-by-design broad: it will capture anything copied anywhere on the machine, sensitive or not.
+- The native title bar is a modern inset style (traffic lights floating over the app's own dark background, no separate white title bar), matching the rest of the UI.
+- Settings also has an Updates section: it checks GitHub's latest release for this repo once at startup and once a day in the background (plus an on-demand "Check for updates" button), and — this is a check-and-notify mechanism only, not a silent updater — if a newer version exists, links to its release page. Installing it is still a manual DMG download/replace; see Packaging below for why.
+
+## Packaging
+
+```bash
+cd desktop
+wails build
+./build/package-dmg.sh
+```
+
+Produces `desktop/build/bin/Thaloca.dmg` (via `hdiutil`, no extra tooling required). `wails build`'s own code-signing step is ad-hoc (`codesign --sign -`), not a real Apple Developer ID signature — a .dmg built this way still triggers Gatekeeper's "cannot be opened because it is from an unidentified developer" warning for anyone who downloads it (they can right-click → Open once, or run `xattr -cr /Applications/Thaloca.app`). Distributing without that warning requires an Apple Developer ID ($99/year) and notarizing via `xcrun notarytool`, which isn't set up here. A .dmg also has no auto-update mechanism on its own — each new version needs its own download and drag-to-Applications.
 
 ## Next focus
 
 - Restarting an arbitrary local process isn't attempted: Thaloca didn't launch it, so it has no command line to relaunch it with (unlike Docker containers, which Docker itself knows how to restart).
-- Diagnostics do not yet cover "noisy logs" (repeated errors in container/job output) — flagged status changes (restart loops, degraded, errored jobs) are covered, but scanning log content for noise was left out for now given the added scanning cost and risk of false positives.
+- Update checking exists (see above) but there's no silent auto-download/install — that would need real code-signing/notarization first (see Packaging), otherwise an automatic update would hit the same Gatekeeper friction a manual one does, with less transparency.
+- No real code-signing/notarization set up — the app is only ad-hoc signed, which is enough to run locally but shows a Gatekeeper warning for anyone else who downloads it.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Desktop development
 

@@ -492,6 +492,14 @@ export interface ClipboardEntry {
   at: string
 }
 
+export interface UpdateInfo {
+  current_version: string
+  latest_version?: string
+  available: boolean
+  release_url?: string
+  error?: string
+}
+
 // TimelineEvent mirrors App.RecentEvents() (desktop/app.go) — an in-memory,
 // session-only ring buffer of runtime/health/action events. Git commits and
 // hook events are not included; the frontend merges those in from
@@ -635,6 +643,8 @@ interface WailsApp {
   ClipboardHistory(): Promise<ClipboardEntry[]>
   DeleteClipboardEntry(id: string): Promise<ClipboardEntry[]>
   ClearClipboardHistory(): Promise<void>
+  GetAppVersion(): Promise<string>
+  CheckForUpdate(): Promise<Partial<UpdateInfo>>
   OpenInstalledApp(path: string): Promise<void>
   QuitInstalledApp(bundleId: string): Promise<void>
   Tools(): Promise<Partial<ToolsSnapshot>>
@@ -780,6 +790,12 @@ export const api = {
   clipboardHistory: (): Promise<ClipboardEntry[]> => wailsApp()?.ClipboardHistory?.() || Promise.resolve([]),
   deleteClipboardEntry: (id: string): Promise<ClipboardEntry[]> => wailsApp()?.DeleteClipboardEntry?.(id) || Promise.resolve([]),
   clearClipboardHistory: (): Promise<void> => wailsApp()?.ClearClipboardHistory?.() || Promise.resolve(),
+  getAppVersion: (): Promise<string> => wailsApp()?.GetAppVersion?.() || Promise.resolve(''),
+  checkForUpdate: (): Promise<UpdateInfo> => {
+    const fallback: UpdateInfo = { current_version: '', available: false }
+    const fn = wailsApp()?.CheckForUpdate
+    return fn ? fn().then(i => ({ ...fallback, ...i })) : Promise.resolve(fallback)
+  },
   refreshInstalledApps: (): Promise<InstalledApp[]> => wailsApp()?.RefreshInstalledApps?.() || Promise.resolve([]),
   openInstalledApp: (path: string): Promise<void> => {
     const fn = wailsApp()?.OpenInstalledApp

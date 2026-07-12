@@ -90,6 +90,9 @@ func (a *App) AddServer(name, host string, port int, user, keyPath, environment 
 	if host == "" || user == "" || keyPath == "" {
 		return ServerConnection{}, fmt.Errorf("host, user, and key path are required")
 	}
+	if !isSafeSSHArg(host) || !isSafeSSHArg(user) {
+		return ServerConnection{}, fmt.Errorf("host and user must not start with \"-\"")
+	}
 	if _, err := os.Stat(keyPath); err != nil {
 		return ServerConnection{}, fmt.Errorf("key file not found: %s", keyPath)
 	}
@@ -146,6 +149,15 @@ func findServer(id string) (ServerConnection, bool) {
 // would otherwise hang forever) without silently accepting a host key that
 // later CHANGES (ssh still fails that case, correctly flagging a possible
 // MITM), and ConnectTimeout bounds how long an unreachable host can stall.
+// isSafeSSHArg rejects a hostname/username that could be misread as an SSH
+// command-line option — ssh's argument parser reads a leading "-" as the
+// start of an option (e.g. "-oProxyCommand=...") rather than as part of the
+// target, a classic argument-injection vector. A genuine hostname or
+// username never starts with a dash.
+func isSafeSSHArg(s string) bool {
+	return s != "" && !strings.HasPrefix(s, "-")
+}
+
 func sshBaseArgs(conn ServerConnection) []string {
 	return []string{
 		"-i", conn.KeyPath,

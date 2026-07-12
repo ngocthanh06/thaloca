@@ -34,9 +34,9 @@ func (a *App) InstalledApps() []InstalledApp {
 	defer cancel()
 
 	a.appsMu.Lock()
-	cached := a.appsCache
+	cached, ok := a.appsCache, a.appsCached
 	a.appsMu.Unlock()
-	if cached == nil {
+	if !ok {
 		cached = a.RefreshInstalledApps()
 	}
 
@@ -87,6 +87,7 @@ func (a *App) RefreshInstalledApps() []InstalledApp {
 
 	a.appsMu.Lock()
 	a.appsCache = apps
+	a.appsCached = true
 	a.appsMu.Unlock()
 	return apps
 }

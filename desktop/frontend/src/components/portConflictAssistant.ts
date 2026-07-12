@@ -31,6 +31,10 @@ export function showPortConflictAssistant(port: number, owner: PortUsage, onReso
   }
 
   const ownerLabel = owner.name || owner.process || (owner.pid ? `PID ${owner.pid}` : 'unknown process')
+  // A usable target needs either a container ID or a positive PID — a bare
+  // process name with no PID (or PID 0/undefined) has no safe action:
+  // `kill 0` sends the signal to the whole process group, not one process.
+  const hasTarget = Boolean(owner.container_id) || owner.pid > 0
   const killCommand = owner.container_id ? `docker stop ${owner.container_id}` : `kill ${owner.pid}`
   const close = () => root!.classList.remove('open')
 
@@ -41,10 +45,12 @@ export function showPortConflictAssistant(port: number, owner: PortUsage, onReso
         <button class="btn-secondary" data-port-conflict-close>Close</button>
       </header>
       <p class="resource-detail">Port ${port} is currently held by <strong>${escapeHTML(ownerLabel)}</strong>${owner.project ? ` (project ${escapeHTML(owner.project)})` : ''}.</p>
-      <div class="settings-buttons">
-        <button class="repo-action danger" data-port-conflict-stop>Stop it</button>
-        <button class="btn-secondary" data-port-conflict-copy>Copy command</button>
-      </div>
+      ${hasTarget ? `
+        <div class="settings-buttons">
+          <button class="repo-action danger" data-port-conflict-stop>Stop it</button>
+          <button class="btn-secondary" data-port-conflict-copy>Copy command</button>
+        </div>` : `
+        <p class="resource-detail muted">No PID or container ID available for it — stop it by hand.</p>`}
     </div>`
 
   root.querySelector('[data-port-conflict-close]')?.addEventListener('click', close)
@@ -55,7 +61,7 @@ export function showPortConflictAssistant(port: number, owner: PortUsage, onReso
     void (async () => {
       try {
         if (owner.container_id) await api.stopContainer(owner.container_id)
-        else if (owner.pid) await api.stopProcess(owner.pid)
+        else if (owner.pid > 0) await api.stopProcess(owner.pid)
       } finally {
         close()
         onResolved()

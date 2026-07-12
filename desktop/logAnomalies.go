@@ -59,11 +59,13 @@ func (a *App) detectLogAnomalies(ctx context.Context, services []Service) []Anom
 		a.logAnomalyState = map[string]*logAnomalyState{}
 	}
 	now := time.Now()
+	seen := make(map[string]bool, len(services))
 	var toScan []Service
 	for _, svc := range services {
 		if svc.Source != "docker" || svc.ContainerID == "" || svc.Status == "stopped" {
 			continue
 		}
+		seen[svc.ID] = true
 		state, ok := a.logAnomalyState[svc.ID]
 		if !ok {
 			state = &logAnomalyState{alerted: map[string]bool{}}
@@ -74,6 +76,16 @@ func (a *App) detectLogAnomalies(ctx context.Context, services []Service) []Anom
 		}
 		state.lastScanned = now
 		toScan = append(toScan, svc)
+	}
+	// Drop state for containers no longer discovered (recreated with a new
+	// ID, or removed) — otherwise this map grows for as long as the app
+	// keeps running in the background, one entry per container ID ever
+	// seen, the same leak class detectAnomalies already avoids for its own
+	// per-service state.
+	for id := range a.logAnomalyState {
+		if !seen[id] {
+			delete(a.logAnomalyState, id)
+		}
 	}
 	a.logAnomalyMu.Unlock()
 

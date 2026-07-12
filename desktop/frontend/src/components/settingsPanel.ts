@@ -1,8 +1,10 @@
-// Settings overlay: notification preferences (which events, quiet hours)
-// and config backup/export-import. Opened via the gear icon in the header.
-import { api } from '../api'
+// Settings overlay: notification preferences (which events, quiet hours),
+// config backup/export-import, and update checking. Opened via the gear
+// icon in the header.
+import { api, type UpdateInfo } from '../api'
 import { showError } from '../dom'
 import { getPinnedRepos, setPinnedRepos } from '../views/sourceControl'
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 
 let current = {
   enabled: true,
@@ -10,9 +12,14 @@ let current = {
   health_failed: true,
   job_errored: true,
   server_disconnected: true,
+  update_available: true,
   quiet_hours_start: '',
   quiet_hours_end: '',
 }
+
+let appVersion = ''
+let updateCheck: UpdateInfo | null = null
+let checkingForUpdate = false
 
 export function initSettingsPanel(): void {
   if (document.getElementById('settings-root')) return
@@ -28,7 +35,9 @@ export function initSettingsPanel(): void {
 
 export async function openSettingsPanel(): Promise<void> {
   initSettingsPanel()
-  current = { ...current, ...(await api.getNotificationSettings()) }
+  const [settings, version] = await Promise.all([api.getNotificationSettings(), api.getAppVersion()])
+  current = { ...current, ...settings }
+  appVersion = version
   render()
   document.getElementById('settings-root')?.classList.add('open')
 }
@@ -54,6 +63,7 @@ function render(): void {
         <label class="settings-checkbox"><input type="checkbox" data-setting="health_failed" ${current.health_failed ? 'checked' : ''}> Health check failed</label>
         <label class="settings-checkbox"><input type="checkbox" data-setting="job_errored" ${current.job_errored ? 'checked' : ''}> Job errored</label>
         <label class="settings-checkbox"><input type="checkbox" data-setting="server_disconnected" ${current.server_disconnected ? 'checked' : ''}> Server disconnected</label>
+        <label class="settings-checkbox"><input type="checkbox" data-setting="update_available" ${current.update_available ? 'checked' : ''}> Update available</label>
         <div class="settings-quiet-hours">
           <label>Quiet hours start <input type="time" class="search-input" data-setting="quiet_hours_start" value="${current.quiet_hours_start || ''}"></label>
           <label>Quiet hours end <input type="time" class="search-input" data-setting="quiet_hours_end" value="${current.quiet_hours_end || ''}"></label>
@@ -67,6 +77,14 @@ function render(): void {
           <button class="btn-secondary" data-settings-import>Import config…</button>
         </div>
       </section>
+      <section class="settings-section">
+        <h3>Updates</h3>
+        <p class="resource-detail muted">Version ${appVersion || '—'}. Checking only looks for a newer GitHub release and links to it — Thaloca doesn't download or install updates itself.</p>
+        <div class="settings-buttons">
+          <button class="btn-secondary" data-settings-check-update ${checkingForUpdate ? 'disabled' : ''}>${checkingForUpdate ? 'Checking…' : 'Check for updates'}</button>
+        </div>
+        ${renderUpdateResult()}
+      </section>
     </div>`
 
   root.querySelector('[data-settings-close]')?.addEventListener('click', closeSettingsPanel)
@@ -75,6 +93,33 @@ function render(): void {
   })
   root.querySelector('[data-settings-export]')?.addEventListener('click', () => void handleExport())
   root.querySelector('[data-settings-import]')?.addEventListener('click', () => void handleImport())
+  root.querySelector('[data-settings-check-update]')?.addEventListener('click', () => void handleCheckForUpdate())
+  root.querySelector('[data-settings-open-release]')?.addEventListener('click', () => {
+    if (updateCheck?.release_url) BrowserOpenURL(updateCheck.release_url)
+  })
+}
+
+function renderUpdateResult(): string {
+  if (!updateCheck) return ''
+  if (updateCheck.error) {
+    return `<p class="resource-detail tool-action-failed">Could not check for updates: ${updateCheck.error}</p>`
+  }
+  if (updateCheck.available) {
+    return `<p class="resource-detail">Thaloca ${updateCheck.latest_version} is available. <button class="btn-secondary" data-settings-open-release>Open release page</button></p>`
+  }
+  return `<p class="resource-detail muted">You're on the latest version.</p>`
+}
+
+async function handleCheckForUpdate(): Promise<void> {
+  checkingForUpdate = true
+  render()
+  try {
+    updateCheck = await api.checkForUpdate()
+  } catch (error) {
+    updateCheck = { current_version: appVersion, available: false, error: String(error) }
+  }
+  checkingForUpdate = false
+  render()
 }
 
 async function handleSettingChange(input: HTMLInputElement): Promise<void> {
@@ -102,6 +147,7 @@ async function handleExport(): Promise<void> {
 }
 
 async function handleImport(): Promise<void> {
+  if (!(await api.confirmDialog('Import config', 'This replaces your current saved servers, ignored/pinned repos, and notification settings with what\'s in the chosen file. Continue?'))) return
   try {
     const backup = await api.importConfig()
     if (!backup || !backup.exported_at) return // cancelled

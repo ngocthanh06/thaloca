@@ -116,7 +116,11 @@ export function wireResourceHistoryHover(container: HTMLElement, samples: Resour
       tooltip.textContent = `${formatSampleTime(sample.at)} — ${spec.format(value)}`
       tooltip.style.display = ''
       const wrapRect = svg.parentElement!.getBoundingClientRect()
-      tooltip.style.left = `${clientX - wrapRect.left + 8}px`
+      // Clamp so the tooltip never bleeds past the card's right edge when
+      // hovering near the end of the line.
+      const tooltipWidth = tooltip.offsetWidth
+      const left = Math.min(clientX - wrapRect.left + 8, wrapRect.width - tooltipWidth - 4)
+      tooltip.style.left = `${Math.max(4, left)}px`
       tooltip.style.top = `${clientY - wrapRect.top - 24}px`
     }
     const hide = () => {

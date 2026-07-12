@@ -138,16 +138,25 @@ func (a *App) checkMemoryLeak() {
 		return
 	}
 
-	first := recent[0].MemPercent
-	last := recent[len(recent)-1].MemPercent
-	minInBetween := first
-	for _, s := range recent {
-		if s.MemPercent < minInBetween {
-			minInBetween = s.MemPercent
-		}
+	// Compare the average of the first half of the window against the
+	// second half, rather than just the two endpoints — a workload that
+	// legitimately oscillates (e.g. 40%/80% every few minutes from normal
+	// GC/cache behavior) can easily start near a trough and end near a
+	// peak, which an endpoints-only check would misread as a sustained
+	// climb. Two-half averages only flag a real, sustained shift.
+	mid := len(recent) / 2
+	var firstSum, secondSum float64
+	for _, s := range recent[:mid] {
+		firstSum += s.MemPercent
 	}
-	if last-first >= growthThreshold && minInBetween >= first-3 {
-		message := fmt.Sprintf("Memory usage climbed from %.0f%% to %.0f%% over the last %d minutes without dropping back", first, last, int(window.Minutes()))
+	for _, s := range recent[mid:] {
+		secondSum += s.MemPercent
+	}
+	firstAvg := firstSum / float64(mid)
+	secondAvg := secondSum / float64(len(recent)-mid)
+
+	if secondAvg-firstAvg >= growthThreshold {
+		message := fmt.Sprintf("Memory usage averaged %.0f%% over the first half of the last %d minutes, %.0f%% over the second half", firstAvg, int(window.Minutes()), secondAvg)
 		a.notifyOnce("memory-leak", "health_failed", "Possible memory leak", message)
 	}
 }

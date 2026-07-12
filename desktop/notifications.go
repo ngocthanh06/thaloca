@@ -23,6 +23,7 @@ type NotificationSettings struct {
 	HealthFailed       bool   `json:"health_failed"`
 	JobErrored         bool   `json:"job_errored"`
 	ServerDisconnected bool   `json:"server_disconnected"`
+	UpdateAvailable    bool   `json:"update_available"`
 	QuietHoursStart    string `json:"quiet_hours_start,omitempty"` // "HH:MM", 24h, empty = no quiet hours
 	QuietHoursEnd      string `json:"quiet_hours_end,omitempty"`
 }
@@ -34,6 +35,7 @@ func defaultNotificationSettings() NotificationSettings {
 		HealthFailed:       true,
 		JobErrored:         true,
 		ServerDisconnected: true,
+		UpdateAvailable:    true,
 	}
 }
 
@@ -144,6 +146,15 @@ func (a *App) notifyOnce(key, eventType, title, message string) {
 		return
 	}
 	a.notifyLast[key] = now
+	// Opportunistically drop long-stale keys (a container/server/health URL
+	// that hasn't had a problem in a day isn't worth remembering a cooldown
+	// for) — otherwise this map would grow for as long as the app keeps
+	// running in the background, one entry per distinct problem ever seen.
+	for k, t := range a.notifyLast {
+		if now.Sub(t) > 24*time.Hour {
+			delete(a.notifyLast, k)
+		}
+	}
 	a.notifyMu.Unlock()
 
 	_ = a.Notify(title, message)
@@ -159,6 +170,8 @@ func eventTypeEnabled(settings NotificationSettings, eventType string) bool {
 		return settings.JobErrored
 	case "server_disconnected":
 		return settings.ServerDisconnected
+	case "update_available":
+		return settings.UpdateAvailable
 	default:
 		return false
 	}

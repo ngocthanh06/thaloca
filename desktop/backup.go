@@ -79,9 +79,21 @@ func (a *App) ImportConfig() (ConfigBackup, error) {
 		return ConfigBackup{}, fmt.Errorf("invalid config file: %w", err)
 	}
 
-	if err := saveServers(backup.Servers); err != nil {
+	// A server entry with a Host/User an attacker (or a corrupted file)
+	// could shape into an SSH option (see isSafeSSHArg) is dropped rather
+	// than failing the whole import — the same validation AddServer
+	// applies when a server is added by hand.
+	safeServers := make([]ServerConnection, 0, len(backup.Servers))
+	for _, s := range backup.Servers {
+		if isSafeSSHArg(s.Host) && isSafeSSHArg(s.User) {
+			safeServers = append(safeServers, s)
+		}
+	}
+	if err := saveServers(safeServers); err != nil {
 		return ConfigBackup{}, err
 	}
+	backup.Servers = safeServers
+
 	settings := userSettings{
 		IgnoredRepos: sliceToSet(backup.IgnoredRepos),
 		EventRepos:   sliceToSet(backup.EventRepos),
@@ -90,8 +102,18 @@ func (a *App) ImportConfig() (ConfigBackup, error) {
 	if err := saveUserSettings(settings); err != nil {
 		return ConfigBackup{}, err
 	}
-	if err := saveNotificationSettings(backup.NotificationSettings); err != nil {
-		return ConfigBackup{}, err
+
+	// A config file that predates notification settings (or was hand-
+	// edited without that field) unmarshals NotificationSettings as its
+	// Go zero value — every toggle false — which would otherwise silently
+	// switch off every notification. Only overwrite if the imported value
+	// looks like it was actually set.
+	if backup.NotificationSettings != (NotificationSettings{}) {
+		if err := saveNotificationSettings(backup.NotificationSettings); err != nil {
+			return ConfigBackup{}, err
+		}
+	} else {
+		backup.NotificationSettings = loadNotificationSettings()
 	}
 	return backup, nil
 }

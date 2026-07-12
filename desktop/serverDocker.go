@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -32,9 +31,11 @@ func runSSHCommand(conn ServerConnection, timeout time.Duration, remoteCommand s
 	return string(out), err
 }
 
-// dockerPSFormat asks Docker for one JSON object per line, decodable
-// directly with encoding/json.
-const dockerPSFormat = `{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}"}`
+// dockerPSFormat asks Docker for one line per container, fields separated
+// by a unit separator (\x1f) — a byte that can't appear in any of these
+// fields, unlike a hand-built JSON string, so a container name/status
+// containing a literal quote can't break parsing or get silently dropped.
+const dockerPSFormat = "{{.ID}}\x1f{{.Names}}\x1f{{.Image}}\x1f{{.Status}}\x1f{{.State}}\x1f{{.Ports}}"
 
 // ListServerContainers lists every container (running or stopped) on a
 // server via `docker ps -a`, parsed into structured rows.
@@ -53,15 +54,22 @@ func (a *App) ListServerContainers(id string) ([]RemoteContainer, error) {
 	}
 	var containers []RemoteContainer
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
-		var c RemoteContainer
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
+		fields := strings.Split(line, "\x1f")
+		if len(fields) != 6 {
 			continue
 		}
-		containers = append(containers, c)
+		containers = append(containers, RemoteContainer{
+			ID:     fields[0],
+			Name:   fields[1],
+			Image:  fields[2],
+			Status: fields[3],
+			State:  fields[4],
+			Ports:  fields[5],
+		})
 	}
 	return containers, nil
 }

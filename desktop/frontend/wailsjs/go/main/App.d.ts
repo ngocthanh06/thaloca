@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddServer(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string):Promise<main.ServerConnection>;
 
+export function CheckForUpdate():Promise<main.UpdateInfo>;
+
 export function CheckHealth(arg1:string):Promise<main.HealthStatus>;
 
 export function CheckServer(arg1:string):Promise<main.ServerHealth>;
@@ -51,6 +53,8 @@ export function FetchRepo(arg1:string):Promise<void>;
 export function FixServerKeyPermissions(arg1:string):Promise<void>;
 
 export function GetActivity():Promise<main.ActivitySummary>;
+
+export function GetAppVersion():Promise<string>;
 
 export function GetNotificationSettings():Promise<main.NotificationSettings>;
 

@@ -322,6 +322,7 @@ export namespace main {
 	    health_failed: boolean;
 	    job_errored: boolean;
 	    server_disconnected: boolean;
+	    update_available: boolean;
 	    quiet_hours_start?: string;
 	    quiet_hours_end?: string;
 	
@@ -336,6 +337,7 @@ export namespace main {
 	        this.health_failed = source["health_failed"];
 	        this.job_errored = source["job_errored"];
 	        this.server_disconnected = source["server_disconnected"];
+	        this.update_available = source["update_available"];
 	        this.quiet_hours_start = source["quiet_hours_start"];
 	        this.quiet_hours_end = source["quiet_hours_end"];
 	    }
@@ -1336,6 +1338,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class UpdateInfo {
+	    current_version: string;
+	    latest_version?: string;
+	    available: boolean;
+	    release_url?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.current_version = source["current_version"];
+	        this.latest_version = source["latest_version"];
+	        this.available = source["available"];
+	        this.release_url = source["release_url"];
+	        this.error = source["error"];
+	    }
 	}
 
 }

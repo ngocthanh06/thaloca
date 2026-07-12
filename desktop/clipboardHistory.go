@@ -88,10 +88,24 @@ func pruneClipboardHistory(entries []ClipboardEntry) []ClipboardEntry {
 // Copy button AND the system-clipboard poller both notice it); if the
 // most recent entry has identical text within the last few seconds, this
 // is treated as the same event rather than appended again.
+// clipboardEntryMaxLen caps how much of one copy is stored. A history list
+// is for recognizing/reusing a recent snippet, not archiving a multi-MB
+// blob — without a cap, copying a large log/SQL dump would make every
+// subsequent read-modify-write of the whole file (see clipboardMu) re-
+// serialize that blob until it ages out.
+const clipboardEntryMaxLen = 4096
+
 func (a *App) RecordClipboardCopy(text, source string) ([]ClipboardEntry, error) {
 	if text == "" {
 		return a.ClipboardHistory(), nil
 	}
+	if len(text) > clipboardEntryMaxLen {
+		text = text[:clipboardEntryMaxLen] + "…"
+	}
+
+	a.clipboardMu.Lock()
+	defer a.clipboardMu.Unlock()
+
 	entries := pruneClipboardHistory(loadClipboardHistoryEntries())
 	if len(entries) > 0 {
 		last := entries[len(entries)-1]
@@ -116,6 +130,9 @@ func (a *App) RecordClipboardCopy(text, source string) ([]ClipboardEntry, error)
 // ClipboardHistory returns the current (auto-pruned) copy history, most
 // recent last.
 func (a *App) ClipboardHistory() []ClipboardEntry {
+	a.clipboardMu.Lock()
+	defer a.clipboardMu.Unlock()
+
 	entries := loadClipboardHistoryEntries()
 	pruned := pruneClipboardHistory(entries)
 	if len(pruned) != len(entries) {
@@ -127,6 +144,9 @@ func (a *App) ClipboardHistory() []ClipboardEntry {
 // DeleteClipboardEntry removes one entry by ID and returns the remaining
 // history.
 func (a *App) DeleteClipboardEntry(id string) ([]ClipboardEntry, error) {
+	a.clipboardMu.Lock()
+	defer a.clipboardMu.Unlock()
+
 	entries := loadClipboardHistoryEntries()
 	filtered := make([]ClipboardEntry, 0, len(entries))
 	for _, e := range entries {
@@ -142,6 +162,8 @@ func (a *App) DeleteClipboardEntry(id string) ([]ClipboardEntry, error) {
 
 // ClearClipboardHistory removes every entry.
 func (a *App) ClearClipboardHistory() error {
+	a.clipboardMu.Lock()
+	defer a.clipboardMu.Unlock()
 	return saveClipboardHistoryEntries(nil)
 }
 

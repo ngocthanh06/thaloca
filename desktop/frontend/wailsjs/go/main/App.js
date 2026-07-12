@@ -6,6 +6,10 @@ export function AddServer(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['AddServer'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
+export function CheckForUpdate() {
+  return window['go']['main']['App']['CheckForUpdate']();
+}
+
 export function CheckHealth(arg1) {
   return window['go']['main']['App']['CheckHealth'](arg1);
 }
@@ -100,6 +104,10 @@ export function FixServerKeyPermissions(arg1) {
 
 export function GetActivity() {
   return window['go']['main']['App']['GetActivity']();
+}
+
+export function GetAppVersion() {
+  return window['go']['main']['App']['GetAppVersion']();
 }
 
 export function GetNotificationSettings() {

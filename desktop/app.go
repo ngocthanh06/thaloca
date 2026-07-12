@@ -94,6 +94,12 @@ type App struct {
 	resourceHistoryMu sync.Mutex
 	resourceHistory   []ResourceSample
 
+	// clipboardMu serializes every read-modify-write of
+	// clipboard-history.json (see desktop/clipboardHistory.go) — it's
+	// reached concurrently by the 1s system-clipboard poller and by
+	// frontend IPC calls (explicit Copy actions, Delete, Clear).
+	clipboardMu sync.Mutex
+
 	healthMu      sync.Mutex
 	healthHistory map[string][]healthSample
 
@@ -138,9 +144,12 @@ type App struct {
 
 	// appsCache holds installed .app bundles' static metadata (see
 	// apps.go) — like toolsCache/gpuCache, only re-scanned via
-	// RefreshInstalledApps rather than on every Resources poll.
-	appsMu    sync.Mutex
-	appsCache []InstalledApp
+	// RefreshInstalledApps rather than on every Resources poll. appsCached
+	// distinguishes "never scanned yet" from "scanned and genuinely found
+	// zero apps", since appsCache alone (nil either way) can't.
+	appsMu     sync.Mutex
+	appsCache  []InstalledApp
+	appsCached bool
 }
 
 func NewApp() *App {
@@ -178,6 +187,11 @@ func (a *App) Startup(ctx context.Context) {
 	// made in any app, not just inside Thaloca, to show up in the copy
 	// history panel.
 	go a.pollSystemClipboard()
+
+	// Checks once at startup and then once a day for a newer GitHub
+	// release; only notifies, never downloads/installs anything itself
+	// (see updates.go for why).
+	go a.checkForUpdateLoop()
 }
 
 // Shutdown runs on a real app quit (Cmd+Q / Dock Quit) — NOT on the window's
