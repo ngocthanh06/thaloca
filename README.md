@@ -1,59 +1,55 @@
 # Thaloca
 
-Thaloca is a local-first developer control center for discovering and managing local ports, Docker workloads, background jobs, Git activity, and environment health.
+Thaloca is a local-first developer control center for macOS. Open it and it
+auto-discovers your local dev environment — Docker containers, processes,
+ports, background jobs, Git repos, and remote servers — no manifest or setup
+step required.
 
-## Current slice
+## Features
 
-The first implementation targets macOS and is auto-discovery-first. The desktop app is the primary workflow: open Thaloca and it scans the local machine without requiring a YAML manifest, project path, or manual CLI setup first.
+**Runtime discovery**
+- Docker containers (grouped by Compose project), local processes, listening
+  ports, and background jobs (cron/launchd/PM2/Docker), each with Start/Stop/
+  Restart/Logs actions and confirmation on anything destructive.
+- HTTP/TCP/TLS health checks against common endpoints (`/health`, `/healthz`,
+  `/ready`, `/live`, `/actuator/health`, `/ping`, `/`).
+- Overview groups everything into per-project cards (via Docker Compose's own
+  project label) and surfaces an anomaly strip for restart loops, degraded
+  health, PM2 `errored` jobs, and log-pattern errors (panics/OOM/repeated
+  failures) scanned from container logs.
 
-It currently discovers:
+**Source Control** — works like SourceTree: stage/unstage, per-file colored
+diffs, commit, conflict resolution ("ours"/"theirs"), commit graph across
+branches, Fetch/Pull/Push/Stash. GitHub login via OAuth device flow (or reuses
+an active `gh auth` session) powers a full Pull Requests tab: list with
+filters/search, Conversation/Commits/Checks/Files-changed detail, inline
+review comments on a GitHub-style split diff, merge/squash/rebase.
 
-- Docker containers, exposed ports, labels, commands, and background workloads.
-- Local listening ports with owner process/container and direct stop action.
-- Cron, launchd, PM2, and Docker background jobs/schedulers.
-- Git repositories in common developer folders, commit history, repo ownership, and weekly activity quality hints.
-- Optional Git commit/push event tracking via opt-in hooks.
-- HTTP/TCP/TLS health checks. Local services are probed across well-known endpoints (`/health`, `/healthz`, `/ready`, `/live`, `/actuator/health`, `/ping`, `/`), so services like qdrant that answer `/healthz` are reported healthy. Endpoints that respond with non-2xx but are reachable are shown as reachable, not dead.
+**Activity** — per-project commit history and a lightweight quality score,
+matched to each repo's own Git identity so multi-account machines stay
+accurate. Optional opt-in commit/push tracking via local Git hooks.
 
-CLI commands still exist for debugging and automation, but they are intentionally not the normal onboarding path.
+**Resources** — live CPU/memory/disk/network/GPU usage, a full process list
+(sortable, killable), installed-apps scan with CPU/Mem and open/quit actions,
+and a 24h sampled history (sparkline charts + a memory-leak heuristic).
 
-## Current behavior
+**Tools** — detects installed package managers/CLIs and their versions, flags
+a project's manifest asking for a tool that isn't installed, and offers
+one-click Install/Update through Homebrew (with the exact command shown
+before running).
 
-- Docker discovery uses `docker ps -a` when Docker is installed. The Runtime view splits into Containers / Processes / Ports / Jobs sub-tabs (git repositories live under the separate Source Control view, not here); containers are grouped by Compose project with collapse/expand, per-container Start/Stop/Restart, inline Logs, an "open Terminal inside the container" action, and project-level Start all / Stop all / Down (`docker compose down`) with a native confirmation dialog. Local processes render as the same compact rows as containers, with a best-effort Logs action (see below).
-- Port discovery lists active local ports and owners. Stop actions are explicit and ask for confirmation.
-- Docker job discovery includes worker-like containers and no-port containers, which often represent agents, crawlers, queues, and long-running jobs. Containers that expose ports are also matched on agent/crawler naming and on the processes running inside them (`docker top`), and each Docker job card lists those in-container processes.
-- PM2 discovery uses `pm2 jlist` read-only when PM2 is installed.
-- Cron and launchd discovery read local schedulers without modifying them.
-- Laravel discovery detects `artisan` and suggests queue/scheduler diagnostic commands.
-- Activity lists projects; clicking a project opens an in-place detail panel with working-tree Changes, full commit History, Branches (create, switch, merge into current, safe delete — merges abort automatically on conflict), a Files browser with text preview, and a Pull Requests tab. Users can ignore noisy repos, and "my commits" matches each repository's own Git identity (local config first, then global), so machines with multiple Git accounts stay accurate.
-- Pull Requests works close to github.com's own PR list and detail view. The list has an Open/Closed/Merged/All tab bar (counts included) plus Author and Label dropdowns (populated from the repo's actual PR authors/labels) and a debounced title/number search — every filter applies immediately, no "Filter" button. A "New pull request" form picks base/head branch, title, description, and draft.
-- A pull request's detail view is split into github.com-style tabs: **Conversation** (description, labels, requested reviewers, issue comments, Comment/Approve/Request changes, Merge — merge/squash/rebase —, Close/Reopen, Ready for review), **Commits**, **Checks** (CI check runs with status/conclusion), and **Files changed** (a file-tree sidebar with add/delete counts and change-type letter; clicking a file loads its own diff — each file's diff comes from GitHub's per-file patch, not a parsed combined blob). Every PR-detail sub-tab loads lazily on first visit.
-- Files changed defaults to a GitHub-style split (old | new) diff with a toggle back to unified. In split view, hovering a line reveals a "+" to add an inline comment — single-line by default, or a range by editing the "From line" field before submitting; existing comment threads (and replies) render inline under their line. Splitting is a best-effort line-pairing over the unified diff (not a true two-sided diff algorithm), so it is usually right but can occasionally misalign large rewrites within a hunk; unified view shows existing inline comments read-only (adding/replying needs split view, since a unified line does not unambiguously map to one side of the diff).
-- Thaloca cannot reliably tell in advance whether the GitHub account currently active (via `gh auth switch`) has access to a given local repo, so the Pull Requests tab is not gated by permission — if the active account lacks access, PR calls simply fail with GitHub's own error.
-- The Source Control view works like SourceTree: pick a repository on the left, then stage/unstage files, view per-file colored diffs (including untracked files), commit staged changes, and resolve merge conflicts by keeping "ours" or "theirs" — every mutating action asks for confirmation first. History opens any commit into its changed files with per-file diffs, and the Graph tab draws the commit DAG across all branches with lane colors and branch/tag badges. A sync toolbar offers Fetch, fast-forward-only Pull, Push, Stash, and Pop.
-- GitHub login uses the OAuth device flow: the app owner registers one OAuth App (Device Flow enabled) and saves its public client id once; after that, "Connect GitHub" opens the browser, the user types a short code, and the resulting token is stored in the macOS Keychain. Pull Requests (list, diff, comments, reviews) talk to the GitHub REST/GraphQL API directly — the `gh` CLI is no longer needed. When the `gh` CLI is installed and logged in, Thaloca always uses whichever account is currently active there instead of its own saved login — the `gh` CLI already supports switching between multiple GitHub accounts (`gh auth switch`), so that is how multiple accounts are supported rather than Thaloca managing its own account list. The connect panel's "Logout" only clears Thaloca's own saved login and is hidden while a `gh` account is active, since it would otherwise have no visible effect.
-- Docker job cards can show the container's recent logs (`docker logs --tail 80`) inline, and a header search box filters services, ports, projects, and jobs.
-- Git event tracking is opt-in per repository. When enabled, Thaloca installs `post-commit` and `pre-push` hooks only if no user hook exists. If a hook cannot be installed, the reason is shown in the Activity view.
-- Activity includes branch, ahead/behind, changed files, staged files, commit type breakdown, and a lightweight quality score.
-- The Overview groups Docker containers, local processes, and Git repositories into projects, and rolls up each project's ports and background jobs as counts on the project card. Docker Compose's own project label is the primary signal; a git repository is folded into the same project if its directory name matches an already-discovered Compose project name (Compose defaults its project name to the directory containing the compose file, normally the repo root, so this is a precise match rather than a guess) — anything left over (mainly local processes, which the scanner has no working-directory signal for) falls under "Unassigned". Project cards sort needs-attention-first: anything with a down service, then degraded, then fully healthy, with Unassigned always last.
-- Local processes have a best-effort Logs action: since Thaloca discovers these processes rather than launching them, it has no captured stdout/stderr, so it tails log files the process currently has open (found via `lsof`) instead. A process that only prints to its original terminal (no log file) reports that no log file was found rather than showing nothing.
-- Stopping a process refuses PID 1 and Thaloca's own process; container/project Start, Stop, Restart, and Down always ask for confirmation first, and every action is recorded in the Timeline.
-- The Overview anomaly strip flags Docker containers/processes stuck restarting or degraded, and now also flags PM2 jobs reported as `errored`.
-- A Resources view shows live machine resource usage: CPU (user/system/idle, from `iostat`), Memory and Swap (`vm_stat`/`sysctl`), and Disk usage per mounted volume (`df`, restricted to `/`, `/System/Volumes/Data`, and `/Volumes/*` so internal APFS system volumes don't clutter the list). Network shows per-interface throughput, computed by diffing two `netstat -ib` samples across polls. GPU is best-effort static info (name/cores/VRAM from `system_profiler`, cached after the first read since it can't change mid-session) with no live usage percentage, since macOS has no user-level API for that. Battery and thermal state are best-effort too and are omitted entirely on machines without a battery or without a reported thermal pressure level. Resources also lists every running process (Activity Monitor-style): PID, CPU%, memory%, user, command, executable path, and — best-effort — the ports it's listening on (the default view caps this at the top 150 processes by CPU; search still scans every process, not just the capped list). Column headers (PID/CPU/Mem) are clickable to sort, and each process has a Stop button (native confirmation first; PID 1 and Thaloca's own process refuse to stop). An Applications section lists every `.app` bundle under `/Applications` and `~/Applications` (name, version, and bundle ID read via `plutil`, cached like Tools' detection since apps come and go far less often than the tab polls) with live CPU/Mem aggregated from any of its running processes. The header search box filters the process table and the applications list the same way it filters Runtime's Services/Ports/Jobs tables. All of the above reads run concurrently rather than one after another, and the tab polls every 5 seconds while open and stops polling when you navigate away.
-- A Tools view detects whether common package-manager/CLI tools are installed and which version (Homebrew, Node.js, npm, pnpm, Yarn, Bun, Python, pip, uv, Composer, Go, Cargo, Docker), and flags discovered projects whose own manifest (`package.json`, `go.mod`, `Cargo.toml`, `composer.json`, `requirements.txt`/`pyproject.toml`, `Dockerfile`/compose files) asks for a tool that isn't installed. Detection results are cached and only re-scanned via the "Refresh" button (spawning every tool's version command takes ~150-200ms, and tool versions don't change on their own mid-session). Each tool also gets an Install or Update button — every one of them runs through Homebrew (`brew install`/`brew upgrade`), except npm and pip, which update themselves; clicking always shows the exact command in a native confirmation dialog first, then streams its live output in-app until it exits. Homebrew itself is the one exception with no automated Install: its official bootstrap script can prompt for a sudo password or an Enter keypress, which can't reach the user when run headless, so a missing Homebrew is just reported, not auto-installed. If a tool's resolved binary lives under a version manager's own directory (nvm, pyenv, volta, or asdf), Thaloca labels it "Managed by <tool>" and doesn't offer Install/Update at all, rather than adding a separate Homebrew-managed copy that wouldn't replace what the version manager already provides.
-- A Servers view manages remote hosts over SSH, wrapping the system `ssh` binary rather than embedding an SSH client library. Add a server with its host, port, SSH user, an optional environment tag (production/staging/dev, cosmetic only), and the path to an existing private key (`.pem`/`.key`) — Thaloca stores only that path (in `~/.thaloca/servers.json`), never the key's contents, the same way `~/.ssh/config` works. If the key file is readable/writable by group or other, a warning appears with a one-click "Fix permissions" button (`chmod 0600`, gated behind confirmation, never touches the key's contents). "Check" runs a bundled, read-only diagnostic over one SSH connection and parses it into structured fields on a best-effort basis: uptime/load average, memory used/total, disk used/total/percent, and Docker container status if present (falling back to the raw script output for anything an unusual distro's `uptime`/`free`/`df` format didn't parse). "Containers" lists every Docker container on that server (via `docker ps -a`) with Start/Stop/Restart (each gated behind a native confirmation, same as local Docker container actions) and a Logs view (`docker logs --tail 200`). "Terminal" opens a real interactive SSH session in-app (`ssh -tt` wrapped in a local PTY via `creack/pty`, rendered with `xterm.js`, streamed over Wails events) — like opening a terminal to that box yourself, arrow keys/Ctrl-C/vim/htop all work, and there's no per-keystroke confirmation, so only run what you'd otherwise type there directly. Only one terminal session is kept alive at a time; opening another one closes the previous. Every SSH call uses `BatchMode=yes` (fail immediately instead of hanging on a password/interactive prompt with no TTY to answer it) and `StrictHostKeyChecking=accept-new` (auto-trust a host's key on first connect, but still fail if a host key later changes).
-- Closing the window hides it rather than quitting Thaloca — it keeps scanning in the background; click the Dock icon to bring the window back, or quit fully with Cmd+Q or the Dock icon's own Quit. A real macOS menu bar icon was attempted (`energye/systray`) but caused a genuine crash: it and Wails' own Cocoa run loop both require the main thread, and no reliable way to reconcile that was found for this Wails version, so it was not pursued further.
-- A fullscreen toggle button sits in the header next to the search box (uses Wails' own window-fullscreen APIs, the same native fullscreen the green traffic-light button already provides).
-- Add Server's form now has labeled fields, a safety notice reiterating that only the key's path is stored, and a native file-picker "Browse…" button for the key path instead of typing it by hand.
-- Docker container logs are scanned periodically (throttled to at most once per container per 30s) for panics/OOM/fatal errors (alerted on first occurrence) and repeated generic error/timeout lines (alerted once they repeat 3+ times in one scan). Findings show up in Overview's anomaly strip and link straight to that container's logs in the Service Inspector. Each distinct error signature (normalized to ignore timestamps/IDs) only alerts once, not on every scan.
-- Native macOS notifications fire for containers stuck restarting, failed health checks, errored jobs, and disconnected servers (server reachability is polled in the background every 3 minutes, independent of the Servers tab being open). Each event type can be toggled independently, with optional quiet hours (including ranges that cross midnight) — all from the gear icon in the header. The same panel has a "possible memory leak" warning based on a two-half-average comparison of the last 30 minutes of memory history (robust to normal oscillation, not just endpoint comparison).
-- Resources has a History section: CPU/Memory/Disk/Network sampled once a minute in the background (so a real 24h history exists whenever the tab is opened, not just while it's open), shown as hand-drawn SVG sparklines with a hover crosshair + tooltip and a 15m/1h/24h range toggle.
-- When starting or restarting a container fails because Docker reports its port is already taken by something else, a port-conflict assistant looks up who currently holds that port (from data already loaded) and offers to stop it or copy the equivalent command.
-- The gear icon's Settings panel also has Export/Import for servers, ignored/pinned repos, and notification settings as one JSON file (via native save/open dialogs) — useful when moving to a new machine. Servers only ever contain a key file path, never its contents, so nothing needs redacting.
-- Cmd+K opens a global command palette: jump to any tab, open a service inspector, restart/stop a running container, open a repo in Source Control, or check/open a terminal to a saved server — all fuzzy-searchable by name.
-- Everything copied — via an explicit Copy button inside Thaloca, a manual Cmd+C selection inside the app, or copied in **any other app on the Mac** (a background poller watches the system pasteboard) — is recorded in a copy history panel (clipboard icon in the header), auto-expiring after 24h or deletable by hand. This is opt-in-by-design broad: it will capture anything copied anywhere on the machine, sensitive or not.
-- The native title bar is a modern inset style (traffic lights floating over the app's own dark background, no separate white title bar), matching the rest of the UI.
-- Settings also has an Updates section: it checks GitHub's latest release for this repo once at startup and once a day in the background (plus an on-demand "Check for updates" button), and — this is a check-and-notify mechanism only, not a silent updater — if a newer version exists, links to its release page. Installing it is still a manual DMG download/replace; see Packaging below for why.
+**Servers** — SSH-managed remote hosts: structured health checks, key
+permission warnings, remote Docker container management, and a real
+interactive terminal (PTY over SSH, xterm.js). Only a key file *path* is ever
+stored, never its contents.
+
+**Cross-cutting** — native notifications (with quiet hours) for problems that
+need attention, a port-conflict assistant, clipboard copy history (in-app and
+system-wide, auto-expiring after 24h), a global command palette (`Cmd+K`),
+config export/import, and a check-for-update notice (see Packaging).
+
+Closing the window hides Thaloca rather than quitting it — background
+scanning keeps running; Cmd+Q or the Dock icon's Quit exits fully.
 
 ## Packaging
 
@@ -63,30 +59,20 @@ wails build
 ./build/package-dmg.sh
 ```
 
-Produces `desktop/build/bin/Thaloca.dmg` (via `hdiutil`, no extra tooling required). `wails build`'s own code-signing step is ad-hoc (`codesign --sign -`), not a real Apple Developer ID signature — a .dmg built this way still triggers Gatekeeper's "cannot be opened because it is from an unidentified developer" warning for anyone who downloads it (they can right-click → Open once, or run `xattr -cr /Applications/Thaloca.app`). Distributing without that warning requires an Apple Developer ID ($99/year) and notarizing via `xcrun notarytool`, which isn't set up here. A .dmg also has no auto-update mechanism on its own — each new version needs its own download and drag-to-Applications.
+Produces `desktop/build/bin/Thaloca.dmg` via `hdiutil` (no extra tooling).
+Code-signing is ad-hoc only (no Apple Developer ID/notarization), so a
+downloaded copy shows Gatekeeper's "unidentified developer" warning —
+right-click → Open once, or `xattr -cr /Applications/Thaloca.app`. Update
+checking only links to the latest GitHub release; it doesn't auto-install.
 
-## Next focus
+## Development
 
-- Restarting an arbitrary local process isn't attempted: Thaloca didn't launch it, so it has no command line to relaunch it with (unlike Docker containers, which Docker itself knows how to restart).
-- Update checking exists (see above) but there's no silent auto-download/install — that would need real code-signing/notarization first (see Packaging), otherwise an automatic update would hit the same Gatekeeper friction a manual one does, with less transparency.
-- No real code-signing/notarization set up — the app is only ad-hoc signed, which is enough to run locally but shows a Gatekeeper warning for anyone else who downloads it.
+```bash
+cd desktop
+wails dev    # live dev
+wails build  # production build
+```
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Desktop development
-
-```bash
-cd desktop
-wails dev
-```
-
-When the app opens it runs an automatic local scan. Services, Ports, Jobs, and Activity render from automatic scans first.
-
-Production build:
-
-```bash
-cd desktop
-wails build
-```
