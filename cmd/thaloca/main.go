@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"thaloca.local/thaloca/internal/detection"
 	"thaloca.local/thaloca/internal/discovery"
 	"thaloca.local/thaloca/internal/integrations"
+	"thaloca.local/thaloca/internal/security"
 )
 
 func main() {
@@ -35,6 +37,8 @@ func main() {
 		err = runCron(ctx, os.Args[2:])
 	case "integrations":
 		err = runIntegrations(ctx, os.Args[2:])
+	case "scan":
+		err = runScanCommand(os.Args[2:])
 	default:
 		usage()
 	}
@@ -129,8 +133,119 @@ func runDetect(args []string) error {
 	return w.Flush()
 }
 
+// runScanCommand dispatches "scan" (a security scan of a local path) from
+// "scan git-hook" (installing/uninstalling the git hooks that run it
+// automatically) — kept as one CLI subcommand so main()'s switch doesn't
+// need to change again when git-hook support lands.
+func runScanCommand(args []string) error {
+	if len(args) > 0 && args[0] == "git-hook" {
+		return runScanGitHook(args[1:])
+	}
+	return runScan(args)
+}
+
+// runScan scans path (default ".") with every available scanner (secrets,
+// vulns, sast — see internal/security) and prints the findings. Unlike the
+// other subcommands, this gets its own longer timeout: a real scan
+// (gitleaks/trivy/gosec/semgrep) commonly takes well past main()'s default
+// 10s budget for the fast local-discovery commands.
+func runScan(args []string) error {
+	path := "."
+	jsonOutput := false
+	failOn := security.SeverityHigh
+	minSeverity := security.SeverityLow
+	for _, arg := range args {
+		switch {
+		case arg == "--json":
+			jsonOutput = true
+		case strings.HasPrefix(arg, "--fail-on="):
+			failOn = security.Severity(strings.TrimPrefix(arg, "--fail-on="))
+		case strings.HasPrefix(arg, "--severity="):
+			minSeverity = security.Severity(strings.TrimPrefix(arg, "--severity="))
+		case !strings.HasPrefix(arg, "--"):
+			path = arg
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	report := security.Scan(ctx, path, nil)
+
+	if jsonOutput {
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
+			return err
+		}
+	} else {
+		printScanReport(report, minSeverity)
+	}
+
+	if failOn != "" && report.HighestSeverity().AtLeast(failOn) {
+		return fmt.Errorf("security scan found findings at or above %q severity", failOn)
+	}
+	return nil
+}
+
+func printScanReport(report security.Report, minSeverity security.Severity) {
+	fmt.Printf("Security scan: %s\n\n", report.Path)
+	for _, s := range report.Statuses {
+		if s.Skipped {
+			fmt.Printf("  [skip] %s (%s): %s\n", s.Scanner, s.Tool, s.Reason)
+		} else {
+			fmt.Printf("  [ok]   %s (%s)\n", s.Scanner, s.Tool)
+		}
+	}
+	fmt.Println()
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "SEVERITY\tSCANNER\tTITLE\tFILE")
+	shown := 0
+	for _, f := range report.Findings {
+		if minSeverity != "" && !f.Severity.AtLeast(minSeverity) {
+			continue
+		}
+		location := f.File
+		if f.Line > 0 {
+			location = fmt.Sprintf("%s:%d", f.File, f.Line)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", f.Severity, f.Scanner, f.Title, location)
+		shown++
+	}
+	w.Flush()
+	fmt.Printf("\n%d finding(s) shown (%d total)\n", shown, len(report.Findings))
+}
+
+// runScanGitHook installs/uninstalls the pre-commit/pre-push hooks that run
+// `thaloca scan` automatically (see internal/security/git_hooks.go).
+func runScanGitHook(args []string) error {
+	repoPath := "."
+	install := contains(args, "--install")
+	uninstall := contains(args, "--uninstall")
+	preCommit := contains(args, "--pre-commit")
+	prePush := contains(args, "--pre-push")
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "--") {
+			repoPath = arg
+		}
+	}
+	if preCommit == prePush {
+		return fmt.Errorf("usage: thaloca scan git-hook --pre-commit|--pre-push --install|--uninstall [path]")
+	}
+	hook := security.HookPreCommit
+	if prePush {
+		hook = security.HookPrePush
+	}
+	switch {
+	case install:
+		return security.InstallGitHook(repoPath, hook)
+	case uninstall:
+		return security.UninstallGitHook(repoPath, hook)
+	default:
+		return fmt.Errorf("usage: thaloca scan git-hook --pre-commit|--pre-push --install|--uninstall [path]")
+	}
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: thaloca <discover|inspect|detect|cron|integrations> [arguments]")
+	fmt.Fprintln(os.Stderr, "Usage: thaloca <discover|inspect|detect|cron|integrations|scan> [arguments]")
 	os.Exit(2)
 }
 

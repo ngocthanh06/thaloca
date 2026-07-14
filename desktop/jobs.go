@@ -110,7 +110,7 @@ func scanPM2Jobs(ctx context.Context) []Job {
 // look like background workloads, and enriching with the in-container
 // process list via `docker top`.
 func scanDockerJobs(ctx context.Context) []Job {
-	services, err := discovery.ScanDocker(ctx)
+	services, _, err := discovery.ScanDocker(ctx)
 	if err != nil {
 		return nil
 	}

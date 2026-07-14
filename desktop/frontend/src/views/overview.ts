@@ -9,6 +9,7 @@
 import type { OverviewResult, ProjectGroup, Anomaly, Service, PortUsage, Job, ActivitySummary } from '../api'
 import { escapeHTML, getStatusClass, formatDate } from '../dom'
 import { openServiceInspector } from '../components/serviceInspector'
+import { t } from '../i18n'
 
 export interface OverviewContext {
   services: Service[]
@@ -22,18 +23,18 @@ export function renderOverviewView(data: OverviewResult | null, ctx: OverviewCon
   if (!container) return
 
   if (!data || data.projects.length === 0) {
-    container.innerHTML = `<div class="empty">Scanning your development environment…</div>`
+    container.innerHTML = `<div class="empty">${t('Scanning your development environment…')}</div>`
     return
   }
 
   const anomaliesHTML = data.anomalies.length
     ? `<div class="anomaly-strip">${data.anomalies.map(renderAnomaly).join('')}</div>`
-    : `<div class="anomaly-strip empty-strip">No active incidents — everything looks healthy.</div>`
+    : `<div class="anomaly-strip empty-strip">${t('No active incidents — everything looks healthy.')}</div>`
 
   const projects = sortProjectsByAttention(data.projects)
 
   container.innerHTML = `
-    <p class="subview-desc">Needs-attention projects first, then everything else — grouped live from Docker Compose, processes, and Git repositories. Nothing here is saved, it is rescanned on every refresh.</p>
+    <p class="subview-desc">${t('Needs-attention projects first, then everything else — grouped live from Docker Compose, processes, and Git repositories. Nothing here is saved, it is rescanned on every refresh.')}</p>
     <div class="overview-summary-row">
       ${renderRuntimeSummary(ctx.services, ctx.ports, ctx.jobs)}
       ${renderSourceSummary(ctx.activity)}
@@ -64,8 +65,8 @@ function renderRuntimeSummary(services: Service[], ports: PortUsage[], jobs: Job
   const processes = services.filter(s => s.source === 'process').length
   return `
     <article class="overview-summary-card">
-      <span class="overview-summary-title">Runtime</span>
-      <p>${running}/${dockerAll.length} containers · ${processes} processes · ${ports.length} ports · ${jobs.length} jobs</p>
+      <span class="overview-summary-title">${t('Runtime')}</span>
+      <p>${running}/${dockerAll.length} ${t('containers')} · ${processes} ${t('processes')} · ${ports.length} ${t(ports.length === 1 ? 'port' : 'ports')} · ${jobs.length} ${t(jobs.length === 1 ? 'job' : 'jobs')}</p>
     </article>`
 }
 
@@ -73,17 +74,17 @@ function renderSourceSummary(activity: ActivitySummary | null): string {
   if (!activity) {
     return `
       <article class="overview-summary-card">
-        <span class="overview-summary-title">Source Control</span>
-        <p>Loading git activity…</p>
+        <span class="overview-summary-title">${t('Source Control')}</span>
+        <p>${t('Loading git activity…')}</p>
       </article>`
   }
   const dirty = activity.repositories.filter(r => !r.ignored && (r.changed_files > 0 || r.staged_files > 0)).length
-  const parts = [`${dirty} ${dirty === 1 ? 'repository' : 'repositories'} changed`]
-  if (activity.ahead) parts.push(`${activity.ahead} ahead`)
-  if (activity.behind) parts.push(`${activity.behind} behind`)
+  const parts = [`${dirty} ${t(dirty === 1 ? 'repository' : 'repositories')} ${t('changed')}`]
+  if (activity.ahead) parts.push(`${activity.ahead} ${t('ahead')}`)
+  if (activity.behind) parts.push(`${activity.behind} ${t('behind')}`)
   return `
     <article class="overview-summary-card">
-      <span class="overview-summary-title">Source Control</span>
+      <span class="overview-summary-title">${t('Source Control')}</span>
       <p>${parts.join(' · ')}</p>
     </article>`
 }
@@ -106,7 +107,7 @@ function renderRecentActivity(activity: ActivitySummary | null): string {
   if (entries.length === 0) return ''
 
   return `
-    <h3 class="section-title">Recent activity</h3>
+    <h3 class="section-title">${t('Recent activity')}</h3>
     <div class="overview-recent">
       ${entries.map(e => `
         <div class="overview-recent-row">
@@ -137,13 +138,18 @@ function renderAnomaly(a: Anomaly): string {
         <span class="anomaly-project">${escapeHTML(a.project)}</span>
         <p>${escapeHTML(a.message)}</p>
       </div>
-      ${clickable ? '<span class="anomaly-link-hint">View logs →</span>' : ''}
+      ${clickable ? `<span class="anomaly-link-hint">${t('View logs →')}</span>` : ''}
     </div>`
 }
 
 // projectOrUnassigned mirrors projectOrUnassigned in desktop/overview.go so
 // ports/jobs without a project label land in the same "Unassigned" bucket
 // the backend already grouped services into.
+// Returns the raw (untranslated) "Unassigned" — this value is also used to
+// match port/job counts against project.name below, which comes from the
+// backend's own grouping (desktop/overview.go) and is never translated, so
+// translating it here would break that match. Display-side translation
+// happens separately, at the one place project.name is actually shown.
 function projectOrUnassigned(project: string | undefined): string {
   return project && project.trim() !== '' ? project : 'Unassigned'
 }
@@ -183,15 +189,18 @@ function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs
   return `
     <article class="overview-card overview-card-${overall}">
       <header>
-        <strong>${escapeHTML(project.name)}</strong>
-        <span class="overview-badge">${project.healthy}/${project.total} healthy</span>
+        <strong>${escapeHTML(project.name === 'Unassigned' ? t('Unassigned') : project.name)}</strong>
+        <div class="overview-card-header-actions">
+          <span class="overview-badge">${project.healthy}/${project.total} ${t('healthy')}</span>
+          <button class="repo-action" data-overview-goto-runtime="${escapeHTML(project.name)}" title="${t('View this group in Runtime')}">${t('Runtime')} →</button>
+        </div>
       </header>
       ${project.degraded || project.down || portCount || jobCount ? `
         <div class="overview-summary">
-          ${project.degraded ? `<span class="chip warning">${project.degraded} degraded</span>` : ''}
-          ${project.down ? `<span class="chip critical">${project.down} down</span>` : ''}
-          ${portCount ? `<span class="chip">${portCount} ${portCount === 1 ? 'port' : 'ports'}</span>` : ''}
-          ${jobCount ? `<span class="chip">${jobCount} ${jobCount === 1 ? 'job' : 'jobs'}</span>` : ''}
+          ${project.degraded ? `<span class="chip warning">${project.degraded} ${t('degraded')}</span>` : ''}
+          ${project.down ? `<span class="chip critical">${project.down} ${t('down')}</span>` : ''}
+          ${portCount ? `<span class="chip">${portCount} ${t(portCount === 1 ? 'port' : 'ports')}</span>` : ''}
+          ${jobCount ? `<span class="chip">${jobCount} ${t(jobCount === 1 ? 'job' : 'jobs')}</span>` : ''}
         </div>` : ''}
       <div class="overview-services">
         ${visible.map(s => `
@@ -201,9 +210,9 @@ function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs
             <span class="overview-service-ports">${(s.ports || []).map(p => ':' + p).join(' ')}</span>
           </button>`).join('')}
         ${hiddenCount > 0
-          ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">+${hiddenCount} more</button>`
+          ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">+${hiddenCount} ${t('more')}</button>`
           : expanded && project.services.length > 4
-            ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">Show less</button>`
+            ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">${t('Show less')}</button>`
             : ''}
       </div>
     </article>`

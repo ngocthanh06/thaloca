@@ -35,9 +35,10 @@ func (s toolActionSpec) display() string {
 // installSpecs installs a tool that's missing. Homebrew itself is
 // deliberately not here: its official bootstrap script can prompt for a
 // sudo password or an Enter keypress, which has no way to reach the user
-// when run headless from this app and would just hang. Every tool below
-// installs via Homebrew, so all of them require brew to already be present
-// (enforced in applyToolActionCommands, not just here).
+// when run headless from this app and would just hang. Almost every tool
+// below installs via Homebrew (requiring brew to already be present,
+// enforced in applyToolActionCommands, not just here) — gosec is the one
+// exception, installed via `go install` (requiring go instead).
 var installSpecs = map[string]toolActionSpec{
 	"node":     {"brew", []string{"install", "node"}},
 	"pnpm":     {"brew", []string{"install", "pnpm"}},
@@ -49,6 +50,15 @@ var installSpecs = map[string]toolActionSpec{
 	"go":       {"brew", []string{"install", "go"}},
 	"cargo":    {"brew", []string{"install", "rust"}},
 	"docker":   {"brew", []string{"install", "--cask", "docker"}},
+	"gitleaks": {"brew", []string{"install", "gitleaks"}},
+	"trivy":    {"brew", []string{"install", "trivy"}},
+	"semgrep":  {"brew", []string{"install", "semgrep"}},
+	"clamscan": {"brew", []string{"install", "clamav"}},
+	// gosec has no homebrew-core formula — its own docs install it via
+	// `go install`, so unlike everything else here this one requires `go`
+	// (not brew) to already be present; applyToolActionCommands's
+	// installed[spec.Bin] check handles that the same way either way.
+	"gosec": {"go", []string{"install", "github.com/securego/gosec/v2/cmd/gosec@latest"}},
 }
 
 // updateSpecs upgrades a tool that's already installed. npm/pip update

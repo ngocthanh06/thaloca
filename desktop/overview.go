@@ -47,6 +47,11 @@ type Snapshot struct {
 	Projects  []ProjectGroup `json:"projects"`
 	Anomalies []Anomaly      `json:"anomalies"`
 	ScannedAt string         `json:"scanned_at"`
+	// DockerStatus is "" when Docker was reached fine (even with zero
+	// containers); otherwise a human-readable reason it couldn't be reached
+	// (CLI missing, daemon/OrbStack not running, wrong context, ...) — see
+	// discoverAll's doc comment.
+	DockerStatus string `json:"docker_status,omitempty"`
 }
 
 // serviceScanState tracks one service's recent status history across scans,
@@ -66,7 +71,7 @@ type serviceScanState struct {
 func (a *App) Snapshot() Snapshot {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	services := discoverAll(ctx)
+	services, dockerStatus := discoverAll(ctx)
 	ports := discoverPorts(ctx)
 	jobs := discoverJobs(ctx)
 	a.diffPortEvents(ports)
@@ -85,12 +90,13 @@ func (a *App) Snapshot() Snapshot {
 		anomalies = []Anomaly{}
 	}
 	return Snapshot{
-		Services:  services,
-		Ports:     ports,
-		Jobs:      jobs,
-		Projects:  projects,
-		Anomalies: anomalies,
-		ScannedAt: time.Now().Format(time.RFC3339),
+		Services:     services,
+		Ports:        ports,
+		Jobs:         jobs,
+		Projects:     projects,
+		Anomalies:    anomalies,
+		ScannedAt:    time.Now().Format(time.RFC3339),
+		DockerStatus: dockerStatus,
 	}
 }
 

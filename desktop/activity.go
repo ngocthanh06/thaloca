@@ -72,11 +72,14 @@ type ActivitySummary struct {
 }
 
 // cachedRepoPaths walks the search roots at most once per TTL; discovering
-// repositories is the slowest part of the activity scan.
-func (a *App) cachedRepoPaths() []string {
+// repositories is the slowest part of the activity scan. force skips the
+// TTL check — used by the header's manual Refresh button, so a repo just
+// cloned into a search root shows up immediately instead of waiting up to
+// 5 minutes.
+func (a *App) cachedRepoPaths(force bool) []string {
 	a.repoCacheMu.Lock()
 	defer a.repoCacheMu.Unlock()
-	if a.repoCache != nil && time.Since(a.repoCacheAt) < 5*time.Minute {
+	if !force && a.repoCache != nil && time.Since(a.repoCacheAt) < 5*time.Minute {
 		return a.repoCache
 	}
 	var paths []string
@@ -89,7 +92,11 @@ func (a *App) cachedRepoPaths() []string {
 	return paths
 }
 
-func (a *App) GetActivity() ActivitySummary {
+// GetActivity scans git activity across discovered repos. force is passed
+// through to cachedRepoPaths (see its doc comment) — pass true for a
+// user-initiated refresh, false for background/internal refreshes that
+// don't need a fresh directory walk.
+func (a *App) GetActivity(force bool) ActivitySummary {
 	settings := loadUserSettings()
 	myName, myEmail := getGlobalGitIdentity()
 
@@ -113,7 +120,7 @@ func (a *App) GetActivity() ActivitySummary {
 		identitySet[global] = true
 	}
 
-	repoPaths := a.cachedRepoPaths()
+	repoPaths := a.cachedRepoPaths(force)
 
 	// Each repo needs ~6 git invocations; running repos sequentially made
 	// the dashboard slow. Process them in parallel with a bounded pool and
@@ -241,21 +248,21 @@ func (a *App) IgnoreRepository(path string) ActivitySummary {
 	}
 	settings.IgnoredRepos[path] = true
 	_ = saveUserSettings(settings)
-	return a.GetActivity()
+	return a.GetActivity(false)
 }
 
 func (a *App) TrackRepository(path string) ActivitySummary {
 	settings := loadUserSettings()
 	delete(settings.IgnoredRepos, path)
 	_ = saveUserSettings(settings)
-	return a.GetActivity()
+	return a.GetActivity(false)
 }
 
 func (a *App) SetMineOnly(enabled bool) ActivitySummary {
 	settings := loadUserSettings()
 	settings.MineOnly = enabled
 	_ = saveUserSettings(settings)
-	return a.GetActivity()
+	return a.GetActivity(false)
 }
 
 func (a *App) EnableGitEvents(path string) ActivitySummary {
@@ -264,13 +271,13 @@ func (a *App) EnableGitEvents(path string) ActivitySummary {
 		settings.EventRepos = map[string]bool{}
 	}
 	if err := installGitEventHooks(path); err != nil {
-		summary := a.GetActivity()
+		summary := a.GetActivity(false)
 		summary.Note = "Could not enable events: " + err.Error()
 		return summary
 	}
 	settings.EventRepos[path] = true
 	_ = saveUserSettings(settings)
-	return a.GetActivity()
+	return a.GetActivity(false)
 }
 
 func (a *App) DisableGitEvents(path string) ActivitySummary {
@@ -278,7 +285,7 @@ func (a *App) DisableGitEvents(path string) ActivitySummary {
 	delete(settings.EventRepos, path)
 	_ = removeGitEventHooks(path)
 	_ = saveUserSettings(settings)
-	return a.GetActivity()
+	return a.GetActivity(false)
 }
 
 func getCommits(repo string, since time.Time) ([]Commit, error) {

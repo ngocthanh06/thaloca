@@ -10,6 +10,17 @@
   --accent: #55d697;
   --accent-dim: #3ebd7e;
   --accent-bg: #0d2d1f;
+  /* Text/icon color for content sitting on a solid --accent fill (primary
+     buttons, the brand mark, count badges). Dark theme's --accent is a
+     bright, light green, so near-black reads cleanly on it; light theme's
+     --accent is a darker green chosen for use as *text* on white, which
+     would give near-black-on-dark-green poor contrast as a fill color —
+     hence this is its own variable rather than reusing --fg or a literal. */
+  --on-accent: #07110c;
+  /* "Online"/pulse glow color — a full-strength solid glow reads fine
+     against a near-black dark background; on white it needs to be much
+     softer (see the light override below) or it looks like a harsh halo. */
+  --accent-glow: #55d697;
   --danger: #ff6b6b;
   --danger-bg: #2d0d0d;
   --warning: #ffc966;
@@ -19,9 +30,121 @@
   --purple: #c084fc;
   --purple-bg: #1e0a3a;
   --shadow: rgba(0, 0, 0, 0.4);
-  --radius: 10px;
-  --radius-sm: 6px;
+  --radius: 14px;
+  --radius-sm: 9px;
   --transition: 150ms ease;
+
+  /* Background "glow" accent behind the splash screen / page root. */
+  --bg-glow: #18253f;
+  /* Code/diff/log panel surface (diff viewer, file preview, job output). */
+  --code-bg: #060a12;
+  --code-fg: #c4d0e2;
+  /* Diff add/remove highlighting, shared by the split and unified viewers. */
+  --diff-add-bg: rgba(85, 214, 151, 0.12);
+  --diff-add-fg: #8ee7b4;
+  --diff-del-bg: rgba(255, 107, 107, 0.12);
+  --diff-del-fg: #ffa3a3;
+  --diff-hunk-bg: rgba(96, 165, 250, 0.08);
+  /* Split-diff cell filler — a faint lightening wash on dark rows. */
+  --diff-empty-bg: rgba(255, 255, 255, 0.015);
+  /* Generic barely-visible divider (diff cells, inline activity rows) — a
+     lightening wash on dark surfaces, a darkening one on light surfaces. */
+  --hairline: rgba(255, 255, 255, 0.03);
+  /* Pull request "merged" badge. */
+  --merged-fg: #a78bfa;
+  --merged-bg: rgba(167, 139, 250, 0.12);
+  /* Source-type badges (Runtime tab's Docker/process/Git/cron/... tags). */
+  --badge-docker-bg: #0d4d73;
+  --badge-docker-fg: #7dd3fc;
+  --badge-process-bg: #4d3a00;
+  --badge-process-fg: #fde047;
+  --badge-git-bg: #3a0d4d;
+  --badge-git-fg: #f0abfc;
+  --badge-cron-bg: #4b2e00;
+  --badge-cron-fg: #fbbf24;
+  --badge-launchd-bg: #312e81;
+  --badge-launchd-fg: #a5b4fc;
+  --badge-pm2-bg: #052e16;
+  --badge-pm2-fg: #86efac;
+  --badge-health-bg: #7c2d12;
+  --badge-health-fg: #fdba74;
+  --badge-action-bg: #1e3a1e;
+  --badge-action-fg: #86efac;
+}
+
+/* Light theme — toggled via a `data-theme="light"` attribute on <html>
+   (see theme.ts); every color used across the app is a var() reference back
+   to this block or the dark one above, so this is the only place a light
+   palette needs to be defined. Semantic hues (accent/danger/warning/info/
+   purple) keep their meaning but shift to darker, contrast-safe shades over
+   pale tints instead of the dark theme's bright-on-near-black pairing. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elevated: #eef0f4;
+  --bg-card: #f7f8fa;
+  --border: #dde1e8;
+  --border-light: #c7cdd6;
+  --fg: #161a23;
+  --fg-muted: #5b6472;
+  --fg-subtle: #6b7280;
+  --accent: #0f8a54;
+  --accent-dim: #0c7548;
+  --accent-bg: #e3f9ee;
+  --accent-glow: rgba(15, 138, 84, 0.35);
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --danger-bg: #fdecec;
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+  --info: #2563eb;
+  --info-bg: #eaf2ff;
+  --purple: #9333ea;
+  --purple-bg: #f3e8ff;
+  --shadow: rgba(15, 23, 42, 0.12);
+
+  --bg-glow: #e4e9f7;
+  --code-bg: #eef1f6;
+  --code-fg: #1f2937;
+  --diff-add-bg: #e6f9ef;
+  --diff-add-fg: #0f7a4a;
+  --diff-del-bg: #fdecec;
+  --diff-del-fg: #c0362c;
+  --diff-hunk-bg: #eaf2ff;
+  --diff-empty-bg: rgba(0, 0, 0, 0.02);
+  --hairline: rgba(0, 0, 0, 0.05);
+  --merged-fg: #7c3aed;
+  --merged-bg: #f2ecfe;
+
+  --badge-docker-bg: #e0f2fe;
+  --badge-docker-fg: #0369a1;
+  --badge-process-bg: #fef9c3;
+  --badge-process-fg: #854d0e;
+  --badge-git-bg: #fae8ff;
+  --badge-git-fg: #86198f;
+  --badge-cron-bg: #fef3c7;
+  --badge-cron-fg: #92400e;
+  --badge-launchd-bg: #e0e7ff;
+  --badge-launchd-fg: #3730a3;
+  --badge-pm2-bg: #dcfce7;
+  --badge-pm2-fg: #166534;
+  --badge-health-bg: #ffedd5;
+  --badge-health-fg: #9a3412;
+  --badge-action-bg: #dcfce7;
+  --badge-action-fg: #166534;
+}
+
+/* Bold dark text on a light background optically reads heavier than the
+   same weight in light text on a dark background — the same 700 that looks
+   crisp as light-on-dark can look thick/crude once flipped to dark-on-light.
+   Trimmed down for the two most visually heavy instances of it (large stat
+   numbers, server names) rather than every bold element in the app. */
+:root[data-theme="light"] .stat-card strong,
+:root[data-theme="light"] .stats article strong {
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .server-row-name strong {
+  font-weight: 600;
 }
 
 * {
@@ -34,7 +157,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: radial-gradient(ellipse at 70% -10%, #18253f 0%, transparent 45%), var(--bg);
+  background: radial-gradient(ellipse at 70% -10%, var(--bg-glow) 0%, transparent 45%), var(--bg);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
   color: var(--fg);
   font-synthesis: none;
@@ -45,6 +168,82 @@ html, body {
   width: 100vw;
   min-width: 0;
   height: 100vh;
+}
+
+/* Shown from the very first paint (it's static markup in index.html, not
+   rendered by main.ts) so the logo is on screen immediately instead of a
+   blank window. Capped to a short fixed duration (see main.ts) rather than
+   tied to how long the real data load takes — the main view already has
+   its own per-section loading placeholders for that. */
+#splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: radial-gradient(ellipse at 70% -10%, var(--bg-glow) 0%, transparent 45%), var(--bg);
+  transition: opacity 300ms ease;
+}
+
+#splash-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#splash-screen img {
+  width: 128px;
+  height: 128px;
+  border-radius: var(--radius);
+}
+
+.splash-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.splash-text strong {
+  font-size: 18px;
+  color: var(--fg);
+}
+
+.splash-text span {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* Blank strip above the sidebar's brand row and the main header (where the
+   inset traffic-light buttons float) — neither of those already-draggable
+   regions starts right at the window's top edge, so without this the space
+   directly under the traffic lights isn't grabbable at all. */
+.drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 26px;
+  --wails-draggable: drag;
+  z-index: 1000;
+}
+
+/* App-wide loading bar shown during a manual Refresh (see startGlobalLoading/
+   stopGlobalLoading in dom.ts) — width/opacity are driven from JS via
+   inline styles, not classes, so this only needs to set the static shape. */
+#global-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 0%;
+  opacity: 0;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  box-shadow: 0 0 8px var(--accent-glow);
+  z-index: 2000;
+  pointer-events: none;
 }
 
 .app-shell {
@@ -91,9 +290,10 @@ html, body {
   height: 30px;
   border-radius: 9px;
   background: linear-gradient(145deg, var(--accent), var(--accent-dim));
-  color: #07110c;
+  color: var(--on-accent);
   font-weight: 900;
   font-size: 15px;
+  object-fit: cover;
 }
 
 .brand-text strong,
@@ -166,7 +366,7 @@ html, body {
   height: 8px;
   background: var(--accent);
   border-radius: 50%;
-  box-shadow: 0 0 12px var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
   animation: pulse 2s infinite;
 }
 
@@ -291,7 +491,7 @@ select.search-input {
 .btn-primary,
 .primary {
   background: var(--accent);
-  color: #07110c;
+  color: var(--on-accent);
   border: 0;
   border-radius: var(--radius-sm);
   padding: 11px 18px;
@@ -594,9 +794,31 @@ select.search-input {
   opacity: 0.65;
 }
 
+.container-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .container-name strong {
   display: block;
   font-size: 13px;
+}
+
+/* Which docker context a container came from (see Service.Engine,
+   internal/discovery/service.go's ScanDocker, which now merges every
+   context instead of only the currently active one). */
+.engine-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--info-bg);
+  color: var(--info);
+  flex-shrink: 0;
 }
 
 .container-name small {
@@ -620,7 +842,7 @@ select.search-input {
 }
 
 .status-dot.status-healthy,
-.status-dot.status-reachable { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.status-dot.status-reachable { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
 .status-dot.status-running { background: var(--info); }
 .status-dot.status-unhealthy,
 .status-dot.status-down { background: var(--danger); }
@@ -673,16 +895,16 @@ select.search-input {
   width: fit-content;
 }
 
-.source-badge.docker { background: #0d4d73; color: #7dd3fc; }
-.source-badge.process { background: #4d3a00; color: #fde047; }
-.source-badge.git { background: #3a0d4d; color: #f0abfc; }
-.source-badge.cron { background: #4b2e00; color: #fbbf24; }
-.source-badge.launchd { background: #312e81; color: #a5b4fc; }
-.source-badge.pm2 { background: #052e16; color: #86efac; }
+.source-badge.docker { background: var(--badge-docker-bg); color: var(--badge-docker-fg); }
+.source-badge.process { background: var(--badge-process-bg); color: var(--badge-process-fg); }
+.source-badge.git { background: var(--badge-git-bg); color: var(--badge-git-fg); }
+.source-badge.cron { background: var(--badge-cron-bg); color: var(--badge-cron-fg); }
+.source-badge.launchd { background: var(--badge-launchd-bg); color: var(--badge-launchd-fg); }
+.source-badge.pm2 { background: var(--badge-pm2-bg); color: var(--badge-pm2-fg); }
 .source-badge.unknown { background: var(--bg-elevated); color: var(--fg-subtle); }
-.source-badge.runtime { background: #0d4d73; color: #7dd3fc; }
-.source-badge.health { background: #7c2d12; color: #fdba74; }
-.source-badge.action { background: #1e3a1e; color: #86efac; }
+.source-badge.runtime { background: var(--badge-docker-bg); color: var(--badge-docker-fg); }
+.source-badge.health { background: var(--badge-health-bg); color: var(--badge-health-fg); }
+.source-badge.action { background: var(--badge-action-bg); color: var(--badge-action-fg); }
 
 .service-name {
   font-size: 16px;
@@ -762,6 +984,19 @@ select.search-input {
   margin: 24px 0 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
+}
+
+.tool-package-search {
+  margin-bottom: 12px;
+}
+
+.tool-package-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 14px 0 6px;
 }
 
 .port {
@@ -998,6 +1233,906 @@ select.search-input {
   background: var(--bg-elevated);
 }
 
+/* Security tab (internal/security scan results + git hook toggles) */
+.security-tab {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.security-hooks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.security-hook-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.security-hook-row strong {
+  display: block;
+  font-size: 13px;
+}
+
+.security-tool-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.security-tool-status.ok { color: var(--accent); }
+.security-tool-status.skipped { color: var(--fg-subtle); }
+
+.security-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.security-finding-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.security-finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.severity-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  height: fit-content;
+}
+
+.severity-badge.severity-critical { background: var(--danger-bg); color: var(--danger); }
+.severity-badge.severity-high { background: var(--danger-bg); color: var(--danger); }
+.severity-badge.severity-medium { background: var(--warning-bg); color: var(--warning); }
+.severity-badge.severity-low { background: var(--bg-elevated); color: var(--fg-muted); }
+
+.security-finding-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.security-finding-group {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.security-finding-group .security-finding-row {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.security-finding-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.security-finding-summary::-webkit-details-marker {
+  display: none;
+}
+
+.security-finding-summary:hover {
+  background: var(--bg-elevated);
+}
+
+.security-finding-occurrences {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.security-finding-occurrences .security-finding-row {
+  padding: 8px 12px 8px 34px;
+  border-bottom: 1px solid var(--border);
+}
+
+.security-finding-occurrences .security-finding-row:last-child {
+  border-bottom: 0;
+}
+
+/* Top-level Security tab (views/security.ts) — the per-repo one above
+   (Source Control's Security sub-tab) reuses the same .security-finding-row
+   etc. classes already defined above. */
+.security-toolbar {
+  margin-bottom: 14px;
+}
+
+.security-tools-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--warning);
+  background: var(--warning-bg);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--fg);
+}
+
+.security-tools-banner strong {
+  color: var(--warning);
+}
+
+.security-tools-banner button {
+  flex-shrink: 0;
+}
+
+/* Tools > Utilities (views/utilities.ts) */
+.utilities-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  height: 100%;
+}
+
+.utilities-sidebar {
+  flex-shrink: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* .search-input's own default width (240px) is wider than this 220px
+   sidebar, so left unset here it overflows past the list below it and
+   visually overlaps the detail panel's border next to it. */
+.utilities-sidebar .search-input {
+  width: 100%;
+}
+
+.utilities-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow-y: auto;
+  height: 80vh;
+}
+
+.utilities-category {
+  padding: 8px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-subtle);
+}
+
+.utilities-list-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.utilities-list-item:hover {
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.utilities-list-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.utilities-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 16px;
+  height: 80vh;
+  overflow-y: auto;
+}
+
+.utilities-detail-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.utilities-detail-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+/* Managed Logs (views/logs.ts) — same sidebar+detail shape as Utilities. */
+.logs-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  height: 100%;
+}
+
+.logs-sidebar {
+  flex-shrink: 0;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logs-sidebar-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.logs-sidebar-toolbar .search-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.logs-source-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow-y: auto;
+  height: 75vh;
+}
+
+.logs-source-group {
+  padding: 6px 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.logs-source-group:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.logs-source-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.logs-source-item:hover {
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.logs-source-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.logs-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 16px;
+  height: 75vh;
+}
+
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logs-toolbar strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logs-toolbar .search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.logs-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.logs-line {
+  display: block;
+}
+
+/* Tools > Env Files (views/envFiles.ts) — keys always visible, values
+   hidden until "Show value" is clicked. */
+.env-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.env-toolbar .search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.env-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.env-project-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+.env-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.env-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.env-file-name {
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+.env-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.env-key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.env-key-name {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  min-width: 200px;
+}
+
+.env-key-value {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-reveal-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Config Files (views/configFiles.ts) */
+.config-section {
+  margin-bottom: 22px;
+}
+
+.config-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+
+.config-section-collapsible > summary.config-section-title {
+  cursor: pointer;
+  user-select: none;
+}
+
+.config-section-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 12px 14px;
+}
+
+.config-row-readonly {
+  background: var(--bg-elevated);
+}
+
+.config-row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.config-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.config-row-name {
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+.config-row-desc {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+}
+
+.config-row-value {
+  font-size: 12px;
+  color: var(--fg);
+  margin-top: 4px;
+}
+
+.config-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.config-badge-on { background: var(--accent-bg); color: var(--accent); }
+.config-badge-off { background: var(--bg-elevated); color: var(--fg-subtle); }
+.config-badge-readonly { background: var(--info-bg); color: var(--info); }
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.toggle-switch input:disabled {
+  cursor: not-allowed;
+}
+
+.toggle-switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.toggle-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+  transition: transform var(--transition), background var(--transition);
+}
+
+.toggle-switch input:checked + .toggle-switch-track {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-switch-track .toggle-switch-thumb {
+  transform: translateX(18px);
+  background: var(--accent);
+}
+
+.toggle-switch input:disabled + .toggle-switch-track {
+  opacity: 0.5;
+}
+
+.utility-io-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.utility-io-panel:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* Two independent inputs (compare, diff) sit side by side instead of
+   stacked — see buildTwoInputPanel in views/utilities.ts. */
+.utility-io-columns {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.utility-io-columns .utility-io-panel {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* Genuinely bidirectional pairs (encode<->decode, CSV<->JSON, timestamp
+   <->date) — two editable panes with a transform toolbar in between,
+   see buildBidirectionalPanel in views/utilities.ts. */
+.utility-bidirectional {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.utility-bidirectional-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.utility-pane-label {
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+.utility-bidirectional-controls {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  flex-shrink: 0;
+  width: 130px;
+}
+
+.utility-bidirectional-controls .btn-primary {
+  white-space: normal;
+  text-align: center;
+}
+
+.utility-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--fg-subtle);
+}
+
+/* A fixed height (rather than flex:1 filling the panel) sidesteps a
+   WebKit quirk where a flex-grown <textarea> can visually overflow past
+   the space the flex layout allocated it, causing whatever comes right
+   after (here, the Copy button) to render as if overlapping its bottom
+   edge. Still manually resizable via the native drag handle. */
+.utility-textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  height: 260px;
+  resize: vertical;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  padding: 8px 10px;
+}
+
+.utility-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Text Diff's colorized output (.diff-line/.diff-add/.diff-del spans) is a
+   <pre>, not a <textarea> — it inherits box/height/border from
+   .utility-textarea but still needs its own scrolling and wrapping since
+   <pre> doesn't get those natively. */
+.utility-html-output {
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.utility-qr-output {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+/* Markdown Preview's rendered-HTML output — unlike .utility-html-output
+   (Text Diff's colorized monospace), this needs to look like real prose:
+   normal proportional font, natural heading/list/paragraph spacing. */
+.utility-rendered-output {
+  overflow-y: auto;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.utility-rendered-output .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 0.6em 0;
+}
+
+.utility-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.55);
+  z-index: 199;
+}
+
+/* "Maximize" on a rendered preview (Markdown/Mermaid) — same technique as
+   Source Control's file viewer (.file-view.maximized): expand the
+   container (toolbar + preview together, so the "Restore" button stays
+   visible and clickable) in place to near-fullscreen, rather than opening
+   a separate modal, so long documents/diagrams get to use most of the
+   screen. */
+.utility-preview-container.maximized {
+  position: fixed;
+  inset: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  box-shadow: 0 20px 60px var(--shadow);
+}
+
+.utility-preview-container.maximized .utility-rendered-output {
+  flex: 1;
+  max-height: none;
+}
+
+.utility-rendered-output h1, .utility-rendered-output h2, .utility-rendered-output h3,
+.utility-rendered-output h4, .utility-rendered-output h5, .utility-rendered-output h6 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.25;
+}
+
+.utility-rendered-output h1:first-child, .utility-rendered-output p:first-child {
+  margin-top: 0;
+}
+
+.utility-rendered-output p {
+  margin: 0.5em 0;
+}
+
+.utility-rendered-output ul, .utility-rendered-output ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.utility-rendered-output li {
+  margin: 0.15em 0;
+}
+
+.utility-rendered-output blockquote {
+  margin: 0.5em 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border-light);
+  color: var(--fg-muted);
+}
+
+.utility-rendered-output code {
+  font-family: ui-monospace, monospace;
+  background: var(--bg-elevated);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.utility-rendered-output pre {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.utility-rendered-output pre code {
+  background: none;
+  padding: 0;
+}
+
+.utility-rendered-output img {
+  max-width: 100%;
+}
+
+.utility-rendered-output hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+
+.utility-rendered-output a {
+  color: var(--accent);
+}
+
+.utility-qr-image {
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px;
+}
+
+.security-summary {
+  margin-bottom: 20px;
+}
+
+.security-repo-group {
+  margin-bottom: 20px;
+}
+
+.security-repo-group-title {
+  font-size: 14px;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.security-repo-pick-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  max-height: 65vh;
+  overflow-y: auto;
+  margin-top: 10px;
+}
+
+.security-repo-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.security-repo-pick-row:last-child {
+  border-bottom: 0;
+}
+
+.security-repo-pick-row:hover {
+  background: var(--bg-elevated);
+}
+
+.security-repo-pick-name {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.security-scan-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.security-scan-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+
+.security-scan-progress-row.security-scan-progress-done {
+  opacity: 0.6;
+}
+
+.security-scan-progress-row.security-scan-progress-running {
+  border-color: var(--accent-dim);
+}
+
 .branch-toolbar {
   display: flex;
   gap: 8px;
@@ -1201,7 +2336,7 @@ select.search-input {
   background: var(--bg-elevated);
 }
 
-.pr-labels-row, .pr-reviewers-row {
+.pr-labels-row, .pr-reviewers-row, .pr-assignees-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1210,12 +2345,7 @@ select.search-input {
   font-size: 12px;
 }
 
-.pr-reviewers-row .pr-reviewer-input {
-  flex: 1;
-  max-width: 260px;
-}
-
-.pr-label-editor {
+.pr-label-editor, .pr-reviewer-editor, .pr-assignee-editor {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -1224,12 +2354,34 @@ select.search-input {
   align-items: center;
 }
 
+/* Forces the Cancel/Save row onto its own line instead of wrapping inline
+   with the checkboxes above it when there are many labels/collaborators. */
+.pr-label-editor .pr-action-buttons,
+.pr-reviewer-editor .pr-action-buttons,
+.pr-assignee-editor .pr-action-buttons {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
 .pr-label-option {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
   color: var(--fg-muted);
+}
+
+.pr-new-people {
+  display: flex;
+  gap: 16px;
+}
+
+.pr-people-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .pr-state {
@@ -1243,7 +2395,7 @@ select.search-input {
 
 .pr-state.open { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-bg); }
 .pr-state.closed { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
-.pr-state.merged { color: #a78bfa; border-color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
+.pr-state.merged { color: var(--merged-fg); border-color: var(--merged-fg); background: var(--merged-bg); }
 
 .pr-diff-toolbar {
   display: flex;
@@ -1274,7 +2426,7 @@ select.search-input {
    grid means every row's columns line up exactly, and only the grid
    itself (not each row) scrolls horizontally when a line is too long. */
 .diff-split {
-  background: #060a12;
+  background: var(--code-bg);
   overflow-x: auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1285,7 +2437,7 @@ select.search-input {
 }
 
 .diff-split-hunk {
-  background: rgba(96, 165, 250, 0.08);
+  background: var(--diff-hunk-bg);
   color: var(--info);
   padding: 2px 12px;
   font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1303,12 +2455,12 @@ select.search-input {
   white-space: pre;
   text-overflow: ellipsis;
   border-left: 1px solid var(--border);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--hairline);
 }
 
-.diff-split-cell.add { background: rgba(85, 214, 151, 0.12); color: #8ee7b4; }
-.diff-split-cell.del { background: rgba(255, 107, 107, 0.12); color: #ffa3a3; }
-.diff-split-cell.diff-cell-empty { background: rgba(255, 255, 255, 0.015); }
+.diff-split-cell.add { background: var(--diff-add-bg); color: var(--diff-add-fg); }
+.diff-split-cell.del { background: var(--diff-del-bg); color: var(--diff-del-fg); }
+.diff-split-cell.diff-cell-empty { background: var(--diff-empty-bg); }
 .diff-split-cell[data-diff-gutter] { cursor: pointer; user-select: none; }
 .diff-split-cell.dragging { box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-bg); }
 
@@ -1328,7 +2480,7 @@ select.search-input {
 /* Unified view reuses the same cell markup as split (so the "+"
    button/drag-select work identically) but one column instead of two. */
 .diff-unified {
-  background: #060a12;
+  background: var(--code-bg);
   overflow-x: auto;
 }
 
@@ -1460,8 +2612,8 @@ select.search-input {
   white-space: nowrap;
 }
 
-.pr-file-add { color: #8ee7b4; }
-.pr-file-del { color: #ffa3a3; }
+.pr-file-add { color: var(--diff-add-fg); }
+.pr-file-del { color: var(--diff-del-fg); }
 
 .pr-file-diff-pane {
   flex: 1;
@@ -1711,7 +2863,7 @@ select.search-input {
   padding: 14px 16px;
   max-height: 420px;
   overflow: auto;
-  background: #060a12;
+  background: var(--code-bg);
   color: var(--fg-muted);
   font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: pre;
@@ -1760,7 +2912,7 @@ select.search-input {
   align-items: baseline;
   padding: 5px 0;
   font-size: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .repo-inline-row:last-of-type {
@@ -1881,7 +3033,7 @@ select.search-input {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: #060a12;
+  background: var(--code-bg);
   color: var(--fg-muted);
   font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: pre-wrap;
@@ -2073,6 +3225,13 @@ select.search-input {
 @media (max-width: 1200px) {
   .app-shell {
     grid-template-columns: 1fr;
+    /* Base .app-shell's grid-template-rows (minmax(0, 1fr)) is written for
+       the 2-column desktop layout, where sidebar and main share one row.
+       Stacked into 2 rows here, that single "1fr" track would stretch
+       whichever one lands in it (the sidebar) to fill the whole window,
+       shoving main down into an auto-sized row below — so it needs its
+       own rows: sidebar sized to its content, main filling what's left. */
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .sidebar {
     border-right: none;
@@ -2157,6 +3316,15 @@ select.search-input {
 .container-row .row-log {
   grid-column: 1 / -1;
   margin: 6px 0 2px;
+}
+
+.container-row .image-scan-panel {
+  grid-column: 1 / -1;
+  margin: 6px 0 2px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
 }
 
 /* ===== Source Control view ===== */
@@ -2425,17 +3593,17 @@ pre.diff {
 }
 
 .diff-line.diff-add {
-  background: rgba(85, 214, 151, 0.1);
-  color: #8ee7b4;
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
 }
 
 .diff-line.diff-del {
-  background: rgba(255, 107, 107, 0.1);
-  color: #ffa3a3;
+  background: var(--diff-del-bg);
+  color: var(--diff-del-fg);
 }
 
 .diff-line.diff-hunk {
-  background: rgba(96, 165, 250, 0.08);
+  background: var(--diff-hunk-bg);
   color: var(--info);
   margin: 4px 0;
 }
@@ -2507,7 +3675,7 @@ pre.diff {
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background: #060a12;
+  background: var(--code-bg);
 }
 
 .file-view header {
@@ -2524,9 +3692,44 @@ pre.diff {
   white-space: nowrap;
 }
 
+.file-view-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Long files were capped to a small 480px box with no way to see more of
+   them at once — this is tall enough that most files fit without an inner
+   scroll at all, while still leaving room for the header/toolbar above it. */
 .file-view pre {
-  max-height: 480px;
-  color: #c4d0e2;
+  max-height: 70vh;
+  color: var(--code-fg);
+}
+
+.file-view-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.55);
+  z-index: 199;
+}
+
+/* "Maximize" — expands the same .file-view element (rather than opening a
+   separate modal) to near-fullscreen for files too long even for the 70vh
+   default. Clicking the backdrop or "Restore" just shrinks it back inline;
+   the file itself stays open either way (only "Close" clears it). */
+.file-view.maximized {
+  position: fixed;
+  inset: 24px;
+  z-index: 200;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px var(--shadow);
+}
+
+.file-view.maximized pre {
+  flex: 1;
+  max-height: none;
 }
 
 /* ===== Commit graph ===== */
@@ -2624,6 +3827,14 @@ pre.diff {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.gh-account-switch {
+  width: auto;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 8px;
+  font-size: 12px;
 }
 
 .gh-panel {
@@ -2985,6 +4196,17 @@ pre.diff {
   font-size: 11px;
   color: var(--fg-muted);
   white-space: nowrap;
+}
+
+.overview-card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overview-card-header-actions .repo-action {
+  padding: 3px 8px;
+  font-size: 11px;
 }
 
 .overview-summary {
@@ -3370,6 +4592,18 @@ pre.diff {
   font-size: 11px;
 }
 
+/* Package registry search results (npm/PyPI/crates.io/Packagist) carry a
+   free-text description of arbitrary length, unlike most other
+   .resource-row-detail usages (short, fixed-vocabulary strings) — this
+   lets that one column shrink and ellipsize instead of pushing the
+   Install button off the edge of the panel. */
+.resource-row-detail.truncate {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .process-table {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3429,6 +4663,18 @@ pre.diff {
 .process-col-path {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The button sits directly above "Last checked: …", which otherwise only
+   gets .resource-detail's own 8px top margin — too tight next to a button. */
+#tools-refresh {
+  margin-bottom: 14px;
+}
+
+/* .resource-detail only has a top margin, so without this "Last checked"
+   sits pressed right against the tool-grid cards directly below it. */
+.tools-last-checked {
+  margin-bottom: 14px;
 }
 
 .tool-grid {
@@ -3546,7 +4792,49 @@ pre.diff {
 }
 
 .servers-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   margin-bottom: 12px;
+}
+
+.server-bulk-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+
+.server-row-select {
+  flex-shrink: 0;
+}
+
+.server-ssh-config-import {
+  margin-bottom: 14px;
+}
+
+.server-bulk-run-panel {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.server-bulk-run-job {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.server-bulk-run-job-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
 }
 
 .server-add-form {
@@ -3612,7 +4900,32 @@ pre.diff {
 }
 
 .server-add-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 14px;
+}
+
+.server-add-check-result {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.server-add-check-result .status-badge {
+  margin-right: 6px;
+}
+
+.servers-summary {
+  margin-bottom: 16px;
+}
+
+/* .resource-list normally clips to its rounded corners (overflow: hidden),
+   which also cut off the "⋮" dropdown menu below whenever it belonged to
+   the last row — the menu needs to be able to spill past the list's own
+   bounds. */
+.resource-list.servers-list {
+  overflow: visible;
 }
 
 .servers-list .server-row {
@@ -3625,27 +4938,177 @@ pre.diff {
   border-bottom: 0;
 }
 
-.server-row-header {
+.server-row-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 18px;
   flex-wrap: wrap;
+}
+
+.server-row-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.server-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.server-status-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.server-status-dot.server-status-online { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+.server-status-dot.server-status-offline { background: var(--danger); }
+.server-status-dot.server-status-checking { background: var(--warning); animation: pulse 1.4s infinite; }
+.server-status-dot.server-status-unknown { background: var(--fg-subtle); }
+
+.server-row-metrics {
+  display: flex;
+  gap: 16px;
+  flex: 1 1 300px;
+}
+
+.server-metric {
+  flex: 1;
+  min-width: 70px;
+}
+
+.server-metric-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.server-metric-empty {
+  display: block;
+  margin-top: 4px;
+}
+
+.resource-meter-fill.checking {
+  width: 40%;
+  background: var(--warning);
+  animation: pulse 1.4s infinite;
+}
+
+.server-row-uptime {
+  flex-shrink: 0;
+  text-align: right;
+  min-width: 130px;
+}
+
+.server-row-uptime strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .server-row-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  align-items: center;
 }
 
-.server-check-output {
-  margin-top: 10px;
+.btn-icon-sm {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--fg-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+  list-style: none;
+}
+
+.btn-icon-sm::-webkit-details-marker { display: none; }
+
+.btn-icon-sm:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-icon-sm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.server-action-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.server-row-menu {
+  position: relative;
+}
+
+.server-row-menu[open] > summary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.server-row-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px var(--shadow);
+  overflow: hidden;
+}
+
+.server-row-menu-panel button {
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.server-row-menu-panel button:hover {
+  background: var(--bg-card);
+}
+
+.server-row-menu-panel button.danger {
+  color: var(--danger);
 }
 
 .env-badge {
   display: inline-block;
-  margin-left: 8px;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-size: 10px;
@@ -3665,38 +5128,22 @@ pre.diff {
   margin-top: 10px;
 }
 
-.server-health {
+.server-unreachable {
   margin-top: 10px;
 }
 
-.server-health-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+.server-raw-details {
+  margin-top: 6px;
 }
 
-.server-health-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+.server-raw-details summary {
+  cursor: pointer;
+  color: var(--fg-subtle);
+  font-size: 11.5px;
 }
 
-.server-health-containers {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.server-health-container-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-  padding: 4px 0;
+.server-check-output {
+  margin-top: 8px;
 }
 
 .server-containers {
@@ -3728,6 +5175,117 @@ pre.diff {
   flex-shrink: 0;
 }
 
+.server-cron {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.server-cron-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.server-cron-row-disabled {
+  opacity: 0.55;
+}
+
+.server-cron-schedule {
+  flex-shrink: 0;
+  min-width: 110px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.server-cron-command {
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.server-cron-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.server-files {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.server-files-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.server-files-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.server-file-breadcrumb {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+}
+
+.server-file-breadcrumb:hover {
+  text-decoration: underline;
+}
+
+.server-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.server-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.server-file-name {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.server-file-dir {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+}
+
+.server-file-dir:hover {
+  text-decoration: underline;
+}
+
 .server-terminal {
   margin-top: 10px;
   border-top: 1px solid var(--border);
@@ -3754,9 +5312,52 @@ pre.diff {
   padding: 8px;
 }
 
-.server-terminal-surface .xterm,
-.server-terminal-surface .xterm-viewport {
+.terminal-session-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-height: 0;
+}
+
+.terminal-xterm-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-xterm-container .xterm,
+.terminal-xterm-container .xterm-viewport {
+  height: 100%;
+}
+
+/* History suggestions for the best-effort in-progress line (see
+   trackLineBuffer in serverTerminal.ts) — only shown once it matches
+   something, never gets in the way otherwise. */
+.terminal-suggest-bar {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+
+.terminal-suggest-bar.visible {
+  display: flex;
+}
+
+.terminal-suggest-chip {
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--fg-muted);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.terminal-suggest-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Resource history sparklines */
@@ -3917,6 +5518,11 @@ pre.diff {
   margin-top: 10px;
 }
 
+.settings-lang-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .clipboard-list {
   display: flex;
   flex-direction: column;
@@ -3948,4 +5554,10 @@ pre.diff {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 380px;
+}
+
+.clipboard-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }

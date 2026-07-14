@@ -30,6 +30,34 @@ func TestDeduplicateKeepsAllNoPortServices(t *testing.T) {
 	}
 }
 
+// Two distinct Docker containers racing for the same host port (e.g. a
+// compose restart briefly overlapping the old and new container) must both
+// still show up — the one that loses the port tie-break is a different
+// container, not a duplicate view of the winner, so it must not vanish
+// entirely (see Deduplicate's `dominated` handling).
+func TestDeduplicateKeepsBothOnSamePrioritysPortCollision(t *testing.T) {
+	services := []Service{
+		{ID: "docker:old", Name: "old", Source: "docker", Ports: []int{8080}},
+		{ID: "docker:new", Name: "new", Source: "docker", Ports: []int{8080}},
+	}
+
+	result := Deduplicate(services)
+
+	if len(result) != 2 {
+		t.Fatalf("expected both containers to be kept, got %v", result)
+	}
+	byID := map[string]Service{}
+	for _, svc := range result {
+		byID[svc.ID] = svc
+	}
+	if len(byID["docker:old"].Ports) != 1 {
+		t.Errorf("first-seen container should keep the port, got %v", byID["docker:old"])
+	}
+	if len(byID["docker:new"].Ports) != 0 {
+		t.Errorf("second container should lose the port but still be present, got %v", byID["docker:new"])
+	}
+}
+
 func TestDeduplicateStableOrder(t *testing.T) {
 	services := []Service{
 		{ID: "git:b", Name: "b", Source: "git", Ports: []int{}},

@@ -5,8 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Thaloca</title>
   <link rel="stylesheet" href="/src/style.css">
+  <script>
+    // Applied synchronously, before first paint, so there's no flash of the
+    // wrong theme while main.ts (an async module) loads and would otherwise
+    // be the first to set this. Kept in sync with theme.ts's own read.
+    document.documentElement.dataset.theme = localStorage.getItem('thaloca-theme') === 'light' ? 'light' : 'dark'
+  </script>
 </head>
 <body>
+  <div id="splash-screen">
+    <img src="/appicon.png" alt="Thaloca" width="128" height="128">
+    <div class="splash-text">
+      <strong>Thaloca</strong>
+      <span>Developer Control Center</span>
+    </div>
+  </div>
   <div id="app"></div>
   <script type="module" src="/src/main.ts"></script>
 </body>

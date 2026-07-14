@@ -5,6 +5,7 @@
 import { api } from '../api'
 import type { Service, HealthSamplePoint } from '../api'
 import { escapeHTML, formatDuration, getStatusClass } from '../dom'
+import { t } from '../i18n'
 
 let currentService: Service | null = null
 let logs: string | undefined
@@ -31,12 +32,12 @@ async function toggleLogs(service: Service): Promise<void> {
     render()
     return
   }
-  logs = 'Loading logs...'
+  logs = t('Loading logs...')
   render()
   try {
-    logs = String((await api.containerLogs(service.container_id)) || 'No log output.')
+    logs = String((await api.containerLogs(service.container_id)) || t('No log output.'))
   } catch (error) {
-    logs = `Could not read logs: ${String(error)}`
+    logs = `${t('Could not read logs:')} ${String(error)}`
   }
   if (currentService?.id === service.id) render()
 }
@@ -56,13 +57,13 @@ export async function runServiceAction(service: Service, action: ServiceAction):
   try {
     switch (action) {
       case 'restart': {
-        const ok = await api.confirmDialog(`Restart ${service.name}?`, 'This will restart the container.')
+        const ok = await api.confirmDialog(`${t('Restart')} ${service.name}?`, t('This will restart the container.'))
         if (!ok) return
         await api.restartContainer(service.container_id)
         break
       }
       case 'stop': {
-        const ok = await api.confirmDialog(`Stop ${service.name}?`, 'This will stop the container.')
+        const ok = await api.confirmDialog(`${t('Stop')} ${service.name}?`, t('This will stop the container.'))
         if (!ok) return
         await api.stopContainer(service.container_id)
         break
@@ -71,7 +72,7 @@ export async function runServiceAction(service: Service, action: ServiceAction):
         await api.startContainer(service.container_id)
         break
       case 'stop-process': {
-        const ok = await api.confirmDialog(`Stop ${service.name}?`, 'This will terminate the process.')
+        const ok = await api.confirmDialog(`${t('Stop')} ${service.name}?`, t('This will terminate the process.'))
         if (!ok) return
         await api.stopProcess(service.pid)
         break
@@ -96,7 +97,7 @@ function renderSparkline(history: HealthSamplePoint[]): void {
   const el = document.getElementById('inspector-sparkline')
   if (!el) return
   if (!history.length) {
-    el.innerHTML = `<p class="empty compact">No health samples yet this session.</p>`
+    el.innerHTML = `<p class="empty compact">${t('No health samples yet this session.')}</p>`
     return
   }
   const latencies = history.map(h => h.latency || 0)
@@ -129,19 +130,19 @@ function render(): void {
     </header>
     <div class="inspector-body">
       <dl class="inspector-facts">
-        <dt>Source</dt><dd>${escapeHTML(s.source)}</dd>
-        ${s.ports?.length ? `<dt>Ports</dt><dd>${s.ports.map(p => ':' + p).join(', ')}</dd>` : ''}
-        ${s.project ? `<dt>Project</dt><dd>${escapeHTML(s.project)}</dd>` : ''}
-        ${s.repo_path ? `<dt>Repository</dt><dd>${escapeHTML(s.repo_path)}</dd>` : ''}
-        ${s.command ? `<dt>Command</dt><dd class="mono">${escapeHTML(s.command)}</dd>` : ''}
+        <dt>${t('Source')}</dt><dd>${escapeHTML(s.source)}</dd>
+        ${s.ports?.length ? `<dt>${t('Ports')}</dt><dd>${s.ports.map(p => ':' + p).join(', ')}</dd>` : ''}
+        ${s.project ? `<dt>${t('Project')}</dt><dd>${escapeHTML(s.project)}</dd>` : ''}
+        ${s.repo_path ? `<dt>${t('Repository')}</dt><dd>${escapeHTML(s.repo_path)}</dd>` : ''}
+        ${s.command ? `<dt>${t('Command')}</dt><dd class="mono">${escapeHTML(s.command)}</dd>` : ''}
       </dl>
       <div id="inspector-sparkline" class="inspector-sparkline"></div>
       <div class="inspector-actions">
-        ${s.source === 'docker' && s.status !== 'stopped' ? `<button data-inspector-action="restart">Restart</button>` : ''}
-        ${s.source === 'docker' && s.status === 'stopped' ? `<button data-inspector-action="start">Start</button>` : ''}
-        ${s.source === 'docker' && s.status !== 'stopped' ? `<button class="danger" data-inspector-action="stop">Stop</button>` : ''}
-        ${s.source === 'process' ? `<button class="danger" data-inspector-action="stop-process">Stop</button>` : ''}
-        ${s.source === 'docker' && s.container_id ? `<button data-inspector-logs>${logs !== undefined ? 'Hide logs' : 'Logs'}</button>` : ''}
+        ${s.source === 'docker' && s.status !== 'stopped' ? `<button data-inspector-action="restart">${t('Restart')}</button>` : ''}
+        ${s.source === 'docker' && s.status === 'stopped' ? `<button data-inspector-action="start">${t('Start')}</button>` : ''}
+        ${s.source === 'docker' && s.status !== 'stopped' ? `<button class="danger" data-inspector-action="stop">${t('Stop')}</button>` : ''}
+        ${s.source === 'process' ? `<button class="danger" data-inspector-action="stop-process">${t('Stop')}</button>` : ''}
+        ${s.source === 'docker' && s.container_id ? `<button data-inspector-logs>${logs !== undefined ? t('Hide logs') : t('Logs')}</button>` : ''}
       </div>
       ${logs !== undefined ? `<pre class="job-log">${escapeHTML(logs)}</pre>` : ''}
     </div>

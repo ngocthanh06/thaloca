@@ -69,6 +69,14 @@ var toolSpecs = []toolSpec{
 	{"Go", "go", []string{"version"}},
 	{"Cargo", "cargo", []string{"--version"}},
 	{"Docker", "docker", []string{"--version"}},
+	// Optional tools the Security tab's scanners use when present (see
+	// internal/security) — tracked here too so installing them is a single
+	// click from this tab instead of a manual `brew install` in a terminal.
+	{"gitleaks", "gitleaks", []string{"version"}},
+	{"Trivy", "trivy", []string{"--version"}},
+	{"gosec", "gosec", []string{"--version"}},
+	{"Semgrep", "semgrep", []string{"--version"}},
+	{"ClamAV", "clamscan", []string{"--version"}},
 }
 
 // manifestRequirements is the simple 1-file-to-1-tool part of project
@@ -244,7 +252,7 @@ func detectProjectRequirements(path string) []string {
 // fully-satisfied projects add no useful signal here.
 func (a *App) readProjectToolGaps(installed map[string]bool) []ProjectToolRequirement {
 	var gaps []ProjectToolRequirement
-	for _, path := range a.cachedRepoPaths() {
+	for _, path := range a.cachedRepoPaths(false) {
 		required := detectProjectRequirements(path)
 		if len(required) == 0 {
 			continue

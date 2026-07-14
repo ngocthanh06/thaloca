@@ -209,6 +209,11 @@ func (a *App) Startup(ctx context.Context) {
 	// even while the user is elsewhere in the app.
 	go a.pollServerReachability()
 
+	// Likewise for sustained CPU/memory/disk pressure on a saved server —
+	// checked on the same background cadence as reachability, independent
+	// of the Servers tab being open.
+	go a.pollServerHealthLoop()
+
 	// Resource history is sampled independently of the Resources tab being
 	// open too, so a meaningful 24h history exists whenever it's visited.
 	go a.sampleResourceHistoryLoop()
@@ -280,9 +285,29 @@ func (a *App) PickKeyFile() (string, error) {
 		Title:           "Choose an SSH private key",
 		ShowHiddenFiles: true,
 		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "Key files (*.pem, *.key)", Pattern: "*.pem;*.key"},
+			{DisplayName: "Key files (*.pem, *.key, *.txt)", Pattern: "*.pem;*.key;*.txt"},
 			{DisplayName: "All files", Pattern: "*.*"},
 		},
+	})
+}
+
+// PickUploadFile opens a native file picker for choosing a local file to
+// upload to a server (Servers tab's file transfer panel). Unlike
+// PickKeyFile, it has no extension filter — any file can be uploaded.
+func (a *App) PickUploadFile() (string, error) {
+	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title:           "Choose a file to upload",
+		ShowHiddenFiles: true,
+	})
+}
+
+// PickDownloadFolder opens a native folder picker for choosing where a
+// downloaded file should be saved (Servers tab's file transfer panel).
+// Kept distinct from PickFolder (used to add a project folder) so each
+// picker's dialog title stays accurate to what it's actually for.
+func (a *App) PickDownloadFolder() (string, error) {
+	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Choose a download destination",
 	})
 }
 

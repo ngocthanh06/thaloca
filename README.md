@@ -1,9 +1,15 @@
-# Thaloca
+<p align="center"><img src="docs/brand/wordmark.png" alt="Thaloca — Developer Control Center" width="480"></p>
 
 Thaloca is a local-first developer control center for macOS. Open it and it
 auto-discovers your local dev environment — Docker containers, processes,
 ports, background jobs, Git repos, and remote servers — no manifest or setup
 step required.
+
+## Screenshots
+
+| Overview | Runtime | Servers |
+| --- | --- | --- |
+| ![Overview](docs/screenshots/overview.png) | ![Runtime](docs/screenshots/runtime.png) | ![Servers](docs/screenshots/servers.png) |
 
 ## Features
 
@@ -38,10 +44,15 @@ a project's manifest asking for a tool that isn't installed, and offers
 one-click Install/Update through Homebrew (with the exact command shown
 before running).
 
-**Servers** — SSH-managed remote hosts: structured health checks, key
-permission warnings, remote Docker container management, and a real
-interactive terminal (PTY over SSH, xterm.js). Only a key file *path* is ever
-stored, never its contents.
+**Servers** — SSH-managed remote hosts: structured health checks (polled
+automatically in the background, with a notification if a server drops
+offline or its CPU/memory/disk stays under pressure), key permission
+warnings, remote Docker container management, a real interactive terminal
+(PTY over SSH, xterm.js), remote crontab viewing/enable/disable/remove, a
+file browser with upload/download (`scp`), running one command across
+several selected servers at once, importing hosts from `~/.ssh/config`, and
+ProxyJump/bastion host support. Only a key file *path* is ever stored, never
+its contents.
 
 **Cross-cutting** — native notifications (with quiet hours) for problems that
 need attention, a port-conflict assistant, clipboard copy history (in-app and

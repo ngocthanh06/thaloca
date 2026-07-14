@@ -250,3 +250,46 @@ func (a *App) checkServerReachability() {
 		a.notifyOnce("server:"+conn.ID, "server_disconnected", "Server disconnected", message)
 	}
 }
+
+// serverHealthThreshold is the CPU/memory/disk percent above which a saved
+// server is considered under resource pressure worth notifying about.
+const serverHealthThreshold = 90
+
+// pollServerHealthLoop periodically runs the same diagnostic bundle as the
+// Servers tab's on-demand "Check" button for every saved server, in the
+// background, so sustained high CPU/memory/disk is noticed without the tab
+// being open. Reachability itself is already covered by
+// pollServerReachability — this only looks at resource pressure on servers
+// that are currently reachable.
+func (a *App) pollServerHealthLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	a.checkServerHealthThresholds()
+	for range ticker.C {
+		a.checkServerHealthThresholds()
+	}
+}
+
+func (a *App) checkServerHealthThresholds() {
+	for _, conn := range loadServers() {
+		health := checkServerHealth(conn)
+		if !health.Reachable {
+			continue
+		}
+		for _, pressure := range []struct {
+			label   string
+			percent int
+		}{
+			{"CPU", health.CPUPercent},
+			{"memory", health.MemPercent},
+			{"disk", health.DiskPercent},
+		} {
+			if pressure.percent < serverHealthThreshold {
+				continue
+			}
+			message := fmt.Sprintf("%s (%s@%s) %s usage is at %d%%", conn.Name, conn.User, conn.Host, pressure.label, pressure.percent)
+			a.addEvent("health", conn.Name, "", "server", conn.ID, "health_failed", message)
+			a.notifyOnce("server-health:"+conn.ID+":"+pressure.label, "health_failed", "Server resource usage high", message)
+		}
+	}
+}

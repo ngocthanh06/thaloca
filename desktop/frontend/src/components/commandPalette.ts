@@ -2,6 +2,7 @@
 // extension of the existing search-box filtering already used elsewhere in
 // main.ts (searchQuery) — no fuzzy-search dependency added.
 import { escapeHTML } from '../dom'
+import { t } from '../i18n'
 
 export interface CommandItem {
   id: string
@@ -29,7 +30,7 @@ export function initCommandPalette(): void {
   root.className = 'cmdk-overlay'
   root.innerHTML = `
     <div class="cmdk-box">
-      <input class="cmdk-input" type="text" placeholder="Search projects, services, and actions..." autocomplete="off" />
+      <input class="cmdk-input" type="text" placeholder="${t('Search projects, services, and actions...')}" autocomplete="off" />
       <div class="cmdk-results"></div>
     </div>
   `
@@ -106,12 +107,12 @@ function renderResults(): void {
   const list = root.querySelector('.cmdk-results')
   if (!list) return
   if (!results.length) {
-    list.innerHTML = `<div class="cmdk-empty">No matches.</div>`
+    list.innerHTML = `<div class="cmdk-empty">${t('No matches.')}</div>`
     return
   }
   list.innerHTML = results.map((item, i) => `
     <button class="cmdk-result ${i === activeIndex ? 'active' : ''}" data-cmdk-index="${i}">
-      <span class="cmdk-kind">${escapeHTML(item.kind)}</span>
+      <span class="cmdk-kind">${escapeHTML(t(item.kind))}</span>
       <span class="cmdk-label">${escapeHTML(item.label)}</span>
       ${item.hint ? `<span class="cmdk-hint">${escapeHTML(item.hint)}</span>` : ''}
     </button>`).join('')

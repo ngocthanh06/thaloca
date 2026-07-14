@@ -5,6 +5,8 @@
 import type { ClipboardEntry } from '../api'
 import { api } from '../api'
 import { escapeHTML, formatDate } from '../dom'
+import { copyToClipboard } from '../clipboard'
+import { t } from '../i18n'
 
 let entries: ClipboardEntry[] = []
 
@@ -46,18 +48,21 @@ function render(): void {
   root.innerHTML = `
     <div class="settings-box">
       <header>
-        <h2>Copy history</h2>
-        <button class="btn-secondary" data-clipboard-close>Close</button>
+        <h2>${t('Copy history')}</h2>
+        <button class="btn-secondary" data-clipboard-close>${t('Close')}</button>
       </header>
-      <p class="resource-detail muted">Everything you copy in Thaloca, kept for 24 hours or until you delete it.</p>
-      ${sorted.length ? `<div class="settings-buttons"><button class="btn-secondary" data-clipboard-clear>Clear all</button></div>` : ''}
+      <p class="resource-detail muted">${t('Everything you copy in Thaloca, kept for 24 hours or until you delete it.')}</p>
+      ${sorted.length ? `<div class="settings-buttons"><button class="btn-secondary" data-clipboard-clear>${t('Clear all')}</button></div>` : ''}
       <div class="clipboard-list">
-        ${sorted.length ? sorted.map(renderRow).join('') : '<div class="empty compact">Nothing copied yet.</div>'}
+        ${sorted.length ? sorted.map(renderRow).join('') : `<div class="empty compact">${t('Nothing copied yet.')}</div>`}
       </div>
     </div>`
 
   root.querySelector('[data-clipboard-close]')?.addEventListener('click', closeClipboardHistoryPanel)
   root.querySelector('[data-clipboard-clear]')?.addEventListener('click', () => void handleClear())
+  root.querySelectorAll<HTMLButtonElement>('[data-clipboard-copy]').forEach(btn => {
+    btn.addEventListener('click', () => void copyToClipboard(btn.dataset.clipboardCopy || '', 'Copy history'))
+  })
   root.querySelectorAll<HTMLButtonElement>('[data-clipboard-delete]').forEach(btn => {
     btn.addEventListener('click', () => void handleDelete(btn.dataset.clipboardDelete || ''))
   })
@@ -71,7 +76,10 @@ function renderRow(entry: ClipboardEntry): string {
         <code>${escapeHTML(preview)}</code>
         <span class="resource-detail muted">${entry.source ? escapeHTML(entry.source) + ' · ' : ''}${escapeHTML(formatDate(entry.at))}</span>
       </div>
-      <button class="btn-secondary" data-clipboard-delete="${escapeHTML(entry.id)}">Delete</button>
+      <div class="clipboard-row-actions">
+        <button class="btn-secondary" data-clipboard-copy="${escapeHTML(entry.text)}">${t('Copy')}</button>
+        <button class="btn-secondary" data-clipboard-delete="${escapeHTML(entry.id)}">${t('Delete')}</button>
+      </div>
     </div>`
 }
 

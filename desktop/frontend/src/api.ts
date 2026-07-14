@@ -12,6 +12,8 @@ export interface Service {
   command: string
   project?: string
   labels: Record<string, string>
+  engine?: string // docker only — which docker context this container came from
+  image?: string // docker only
 }
 
 export interface PortUsage {
@@ -123,6 +125,38 @@ export interface GitHubStatus {
   source?: string // 'gh' | 'keychain' | 'git-credential'
 }
 
+export interface GitHubCLIAccount {
+  login: string
+  active: boolean
+}
+
+// Only key names — values are fetched one at a time, on explicit request
+// (see api.getEnvValue), never as part of this list.
+export interface EnvFileSummary {
+  project_path: string
+  project_name: string
+  file_name: string
+  keys: string[]
+}
+
+// One config file (or, for category "telemetry", one setting read out of a
+// config file) shown in the Config Files view. Only "shell" entries can be
+// toggleable (and even then, only when their source line is guarded and
+// they aren't git-tracked) — see desktop/configFiles.go for why "tool" and
+// "telemetry" entries are always read-only.
+export interface ConfigFileEntry {
+  id: string
+  category: 'shell' | 'home' | 'tool' | 'telemetry'
+  name: string
+  path: string
+  source_name?: string
+  exists: boolean
+  enabled: boolean
+  toggleable: boolean
+  description: string
+  detected_value?: string
+}
+
 export interface DeviceCode {
   user_code: string
   verification_uri: string
@@ -191,6 +225,7 @@ export interface PullRequestDetail {
   base_ref: string
   labels?: string[]
   requested_reviewers?: string[]
+  assignees?: string[]
 }
 
 export interface PullRequestCommit {
@@ -300,6 +335,10 @@ export interface Snapshot {
   projects: ProjectGroup[]
   anomalies: Anomaly[]
   scanned_at: string
+  // "" when Docker was reached fine (even with zero containers); otherwise
+  // a human-readable reason it couldn't be (CLI missing, daemon/OrbStack
+  // not running, ...) — see desktop/discovery.go's discoverAll.
+  docker_status?: string
 }
 
 // Mirrors App.Resources() (desktop/resources.go) — a live read of CPU,
@@ -409,6 +448,26 @@ export interface ToolActionStatus {
   error?: string
 }
 
+export interface BrewSearchResult {
+  name: string
+  is_cask: boolean
+}
+
+export interface BrewPackages {
+  formulae: string[]
+  casks: string[]
+}
+
+// npm/PyPI/crates.io/Packagist — see desktop/languagePackages.go. PyPI has
+// no real public search API, so its "search" is really a single
+// exact-name existence check (0 or 1 result), not a fuzzy search.
+export type LanguageRegistry = 'npm' | 'pypi' | 'cargo' | 'composer'
+
+export interface RegistryPackage {
+  name: string
+  description?: string
+}
+
 export interface ServerConnection {
   id: string
   name: string
@@ -417,6 +476,7 @@ export interface ServerConnection {
   user: string
   key_path: string
   environment?: string
+  proxy_jump?: string
 }
 
 export interface RemoteContainerStatus {
@@ -427,13 +487,76 @@ export interface RemoteContainerStatus {
 export interface ServerHealth {
   reachable: boolean
   uptime: string
+  cpu_percent: number
   memory: string
+  mem_percent: number
   disk: string
   disk_percent: number
   docker_available: boolean
   containers: RemoteContainerStatus[]
   raw: string
   error?: string
+}
+
+export interface CronJob {
+  line: number
+  schedule: string
+  command: string
+  disabled: boolean
+  source: string
+  env?: string[]
+}
+
+// ~/.ssh/config entry, used only to prefill the Add Server form.
+export interface SSHConfigHost {
+  alias: string
+  host: string
+  port: number
+  user: string
+  key_path: string
+  proxy_jump?: string
+}
+
+export interface RemoteFile {
+  name: string
+  is_dir: boolean
+  size: number
+  mod_time: number
+}
+
+// Mirrors internal/security's types (Finding/ScannerStatus/Report) and
+// desktop/security.go's bindings.
+export type SecuritySeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export interface SecurityFinding {
+  scanner: string
+  tool: string
+  severity: SecuritySeverity
+  title: string
+  detail?: string
+  file?: string
+  line?: number
+  rule_id?: string
+}
+
+export interface SecurityScannerStatus {
+  scanner: string
+  tool?: string
+  skipped: boolean
+  reason?: string
+}
+
+export interface SecurityReport {
+  path: string
+  scanned_at: string
+  findings: SecurityFinding[]
+  statuses: SecurityScannerStatus[]
+  counts: Partial<Record<SecuritySeverity, number>>
+}
+
+export interface GitHookStatus {
+  pre_commit: boolean
+  pre_push: boolean
 }
 
 export interface RemoteContainer {
@@ -555,6 +678,7 @@ function normalizeSnapshot(value: Partial<Snapshot> | null | undefined): Snapsho
     projects: Array.isArray(value?.projects) ? value.projects : [],
     anomalies: Array.isArray(value?.anomalies) ? value.anomalies : [],
     scanned_at: value?.scanned_at || '',
+    docker_status: value?.docker_status || '',
   }
 }
 
@@ -590,11 +714,20 @@ function normalizeToolActionStatus(value: Partial<ToolActionStatus> | null | und
   }
 }
 
+function normalizeBrewPackages(value: Partial<BrewPackages> | null | undefined): BrewPackages {
+  return {
+    formulae: Array.isArray(value?.formulae) ? value.formulae : [],
+    casks: Array.isArray(value?.casks) ? value.casks : [],
+  }
+}
+
 function normalizeServerHealth(value: Partial<ServerHealth> | null | undefined): ServerHealth {
   return {
     reachable: Boolean(value?.reachable),
     uptime: value?.uptime || '',
+    cpu_percent: value?.cpu_percent ?? -1,
     memory: value?.memory || '',
+    mem_percent: value?.mem_percent ?? -1,
     disk: value?.disk || '',
     disk_percent: value?.disk_percent ?? -1,
     docker_available: Boolean(value?.docker_available),
@@ -606,6 +739,28 @@ function normalizeServerHealth(value: Partial<ServerHealth> | null | undefined):
 
 function normalizeRemoteContainers(value: unknown): RemoteContainer[] {
   return Array.isArray(value) ? value : []
+}
+
+function normalizeCronJobs(value: unknown): CronJob[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeSSHConfigHosts(value: unknown): SSHConfigHost[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeRemoteFiles(value: unknown): RemoteFile[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeSecurityReport(value: Partial<SecurityReport> | null | undefined): SecurityReport {
+  return {
+    path: value?.path || '',
+    scanned_at: value?.scanned_at || '',
+    findings: Array.isArray(value?.findings) ? value.findings : [],
+    statuses: Array.isArray(value?.statuses) ? value.statuses : [],
+    counts: value?.counts || {},
+  }
 }
 
 export function normalizeServerList(value: unknown): ServerConnection[] {
@@ -643,6 +798,8 @@ interface WailsApp {
   ClipboardHistory(): Promise<ClipboardEntry[]>
   DeleteClipboardEntry(id: string): Promise<ClipboardEntry[]>
   ClearClipboardHistory(): Promise<void>
+  GetClipboardHistoryEnabled(): Promise<boolean>
+  SetClipboardHistoryEnabled(enabled: boolean): Promise<void>
   GetAppVersion(): Promise<string>
   CheckForUpdate(): Promise<Partial<UpdateInfo>>
   OpenInstalledApp(path: string): Promise<void>
@@ -651,10 +808,20 @@ interface WailsApp {
   RefreshTools(): Promise<Partial<ToolsSnapshot>>
   RunToolAction(tool: string, action: string): Promise<string>
   ToolActionStatus(jobID: string): Promise<Partial<ToolActionStatus>>
+  SearchBrewPackages(query: string): Promise<BrewSearchResult[]>
+  ListBrewPackages(): Promise<Partial<BrewPackages>>
+  InstallBrewPackage(name: string, isCask: boolean): Promise<string>
+  UninstallBrewPackage(name: string, isCask: boolean): Promise<string>
+  SearchLanguagePackages(registry: string, query: string): Promise<RegistryPackage[]>
+  ListLanguagePackages(registry: string): Promise<string[]>
+  InstallLanguagePackage(registry: string, name: string): Promise<string>
+  UninstallLanguagePackage(registry: string, name: string): Promise<string>
   ListServers(): Promise<ServerConnection[]>
-  AddServer(name: string, host: string, port: number, user: string, keyPath: string, environment: string): Promise<ServerConnection>
+  AddServer(name: string, host: string, port: number, user: string, keyPath: string, environment: string, proxyJump: string): Promise<ServerConnection>
+  UpdateServer(id: string, name: string, host: string, port: number, user: string, keyPath: string, environment: string, proxyJump: string): Promise<ServerConnection>
   RemoveServer(id: string): Promise<void>
   CheckServer(id: string): Promise<Partial<ServerHealth>>
+  CheckServerDraft(host: string, port: number, user: string, keyPath: string, proxyJump: string): Promise<Partial<ServerHealth>>
   KeyPermissionWarning(id: string): Promise<string>
   FixServerKeyPermissions(id: string): Promise<void>
   RunServerCommand(id: string, command: string): Promise<string>
@@ -663,6 +830,25 @@ interface WailsApp {
   ResizeServerTerminal(sessionId: string, cols: number, rows: number): Promise<void>
   CloseServerTerminal(sessionId: string): Promise<void>
   ListServerContainers(id: string): Promise<RemoteContainer[]>
+  ListServerCron(id: string): Promise<CronJob[]>
+  SetServerCronEnabled(id: string, line: number, enabled: boolean): Promise<void>
+  RemoveServerCronLine(id: string, line: number): Promise<void>
+  ListSSHConfigHosts(): Promise<SSHConfigHost[]>
+  ListServerFiles(id: string, remotePath: string): Promise<RemoteFile[]>
+  UploadServerFile(id: string, localPath: string, remotePath: string): Promise<string>
+  DownloadServerFile(id: string, remotePath: string, localDir: string): Promise<string>
+  PickUploadFile(): Promise<string>
+  PickDownloadFolder(): Promise<string>
+  RunSecurityScan(path: string): Promise<Partial<SecurityReport>>
+  GetGitHookStatus(repoPath: string): Promise<Partial<GitHookStatus>>
+  InstallGitHook(repoPath: string, kind: string): Promise<void>
+  UninstallGitHook(repoPath: string, kind: string): Promise<void>
+  RunSecurityScanAll(paths: string[]): Promise<Partial<SecurityReport>[]>
+  OpenFileAtLine(root: string, file: string, line: number): Promise<void>
+  RevealFileInFinder(root: string, file: string): Promise<void>
+  ScanContainerImage(image: string): Promise<Partial<SecurityReport>>
+  GetTerminalHistory(serverId: string): Promise<string[]>
+  AppendTerminalHistory(serverId: string, command: string): Promise<void>
   ServerContainerLogs(id: string, containerId: string): Promise<string>
   StartServerContainer(id: string, containerId: string): Promise<void>
   StopServerContainer(id: string, containerId: string): Promise<void>
@@ -673,7 +859,7 @@ interface WailsApp {
   StopProcess(pid: number): Promise<void>
   StopContainer(id: string): Promise<void>
   StartContainer(id: string): Promise<void>
-  GetActivity(): Promise<Partial<ActivitySummary>>
+  GetActivity(force: boolean): Promise<Partial<ActivitySummary>>
   IgnoreRepository(path: string): Promise<Partial<ActivitySummary>>
   TrackRepository(path: string): Promise<Partial<ActivitySummary>>
   SetMineOnly(enabled: boolean): Promise<Partial<ActivitySummary>>
@@ -707,10 +893,13 @@ interface WailsApp {
   GitHubLogout(): Promise<void>
   GitHubCLIInstalled(): Promise<boolean>
   InstallAndLoginGitHubCLI(): Promise<void>
+  GitHubCLIAccounts(): Promise<GitHubCLIAccount[]>
+  SwitchGitHubCLIAccount(login: string): Promise<void>
   RepoGraph(path: string, limit: number): Promise<GraphCommit[]>
   FetchRepo(path: string): Promise<void>
   PullRepo(path: string): Promise<void>
   PushRepo(path: string): Promise<void>
+  PushBranch(path: string, branch: string): Promise<void>
   StashSave(path: string): Promise<void>
   StashPop(path: string): Promise<void>
   StashList(path: string): Promise<string[]>
@@ -733,8 +922,12 @@ interface WailsApp {
   ReopenPullRequest(path: string, num: number): Promise<void>
   MarkPullRequestReadyForReview(path: string, num: number): Promise<void>
   RequestReviewers(path: string, num: number, reviewers: string[]): Promise<void>
+  RemoveReviewers(path: string, num: number, reviewers: string[]): Promise<void>
+  AddAssignees(path: string, num: number, assignees: string[]): Promise<void>
+  RemoveAssignees(path: string, num: number, assignees: string[]): Promise<void>
   SetPullRequestLabels(path: string, num: number, labels: string[]): Promise<void>
   ListRepositoryLabels(path: string): Promise<string[]>
+  ListRepositoryCollaborators(path: string): Promise<string[]>
   CreatePullRequest(path: string, base: string, head: string, title: string, body: string, draft: boolean): Promise<PullRequest>
   PullRequestCommits(path: string, num: number): Promise<PullRequestCommit[]>
   PullRequestChecks(path: string, num: number): Promise<CheckRun[]>
@@ -742,6 +935,11 @@ interface WailsApp {
   ListReviewComments(path: string, num: number): Promise<ReviewComment[]>
   CreateReviewComment(path: string, num: number, commitID: string, filePath: string, line: number, side: string, startLine: number, startSide: string, body: string): Promise<void>
   ReplyToReviewComment(path: string, num: number, commentID: number, body: string): Promise<void>
+  ListEnvFiles(): Promise<EnvFileSummary[]>
+  GetEnvValue(projectPath: string, fileName: string, key: string): Promise<string>
+  GetEnvFileContent(projectPath: string, fileName: string): Promise<string>
+  ListConfigFiles(): Promise<ConfigFileEntry[]>
+  ToggleConfigFile(path: string): Promise<boolean>
 }
 
 declare global {
@@ -790,6 +988,8 @@ export const api = {
   clipboardHistory: (): Promise<ClipboardEntry[]> => wailsApp()?.ClipboardHistory?.() || Promise.resolve([]),
   deleteClipboardEntry: (id: string): Promise<ClipboardEntry[]> => wailsApp()?.DeleteClipboardEntry?.(id) || Promise.resolve([]),
   clearClipboardHistory: (): Promise<void> => wailsApp()?.ClearClipboardHistory?.() || Promise.resolve(),
+  getClipboardHistoryEnabled: (): Promise<boolean> => wailsApp()?.GetClipboardHistoryEnabled?.() || Promise.resolve(true),
+  setClipboardHistoryEnabled: (enabled: boolean): Promise<void> => wailsApp()?.SetClipboardHistoryEnabled?.(enabled) || Promise.resolve(),
   getAppVersion: (): Promise<string> => wailsApp()?.GetAppVersion?.() || Promise.resolve(''),
   checkForUpdate: (): Promise<UpdateInfo> => {
     const fallback: UpdateInfo = { current_version: '', available: false }
@@ -821,21 +1021,61 @@ export const api = {
     const fn = wailsApp()?.ToolActionStatus
     return fn ? fn(jobID).then(normalizeToolActionStatus) : Promise.resolve(normalizeToolActionStatus(null))
   },
+  searchBrewPackages: (query: string): Promise<BrewSearchResult[]> => {
+    const fn = wailsApp()?.SearchBrewPackages
+    return fn ? fn(query).then(v => (Array.isArray(v) ? v : [])) : Promise.resolve([])
+  },
+  listBrewPackages: (): Promise<BrewPackages> => {
+    const fn = wailsApp()?.ListBrewPackages
+    return fn ? fn().then(normalizeBrewPackages) : Promise.resolve(normalizeBrewPackages(null))
+  },
+  installBrewPackage: (name: string, isCask: boolean): Promise<string> => {
+    const fn = wailsApp()?.InstallBrewPackage
+    return fn ? fn(name, isCask) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  uninstallBrewPackage: (name: string, isCask: boolean): Promise<string> => {
+    const fn = wailsApp()?.UninstallBrewPackage
+    return fn ? fn(name, isCask) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  searchLanguagePackages: (registry: LanguageRegistry, query: string): Promise<RegistryPackage[]> => {
+    const fn = wailsApp()?.SearchLanguagePackages
+    return fn ? fn(registry, query).then(v => (Array.isArray(v) ? v : [])) : Promise.resolve([])
+  },
+  listLanguagePackages: (registry: LanguageRegistry): Promise<string[]> => {
+    const fn = wailsApp()?.ListLanguagePackages
+    return fn ? fn(registry).then(v => (Array.isArray(v) ? v : [])) : Promise.resolve([])
+  },
+  installLanguagePackage: (registry: LanguageRegistry, name: string): Promise<string> => {
+    const fn = wailsApp()?.InstallLanguagePackage
+    return fn ? fn(registry, name) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  uninstallLanguagePackage: (registry: LanguageRegistry, name: string): Promise<string> => {
+    const fn = wailsApp()?.UninstallLanguagePackage
+    return fn ? fn(registry, name) : Promise.reject(new Error('Wails runtime not available'))
+  },
   listServers: (): Promise<ServerConnection[]> => {
     const fn = wailsApp()?.ListServers
     return fn ? fn().then(normalizeServerList) : Promise.resolve([])
   },
-  addServer: (name: string, host: string, port: number, user: string, keyPath: string, environment: string): Promise<ServerConnection> => {
+  addServer: (name: string, host: string, port: number, user: string, keyPath: string, environment: string, proxyJump: string): Promise<ServerConnection> => {
     const fn = wailsApp()?.AddServer
-    return fn ? fn(name, host, port, user, keyPath, environment) : Promise.reject(new Error('Wails runtime not available'))
+    return fn ? fn(name, host, port, user, keyPath, environment, proxyJump) : Promise.reject(new Error('Wails runtime not available'))
   },
   removeServer: (id: string): Promise<void> => {
     const fn = wailsApp()?.RemoveServer
     return fn ? fn(id) : Promise.reject(new Error('Wails runtime not available'))
   },
+  updateServer: (id: string, name: string, host: string, port: number, user: string, keyPath: string, environment: string, proxyJump: string): Promise<ServerConnection> => {
+    const fn = wailsApp()?.UpdateServer
+    return fn ? fn(id, name, host, port, user, keyPath, environment, proxyJump) : Promise.reject(new Error('Wails runtime not available'))
+  },
   checkServer: (id: string): Promise<ServerHealth> => {
     const fn = wailsApp()?.CheckServer
     return fn ? fn(id).then(normalizeServerHealth) : Promise.resolve(normalizeServerHealth(null))
+  },
+  checkServerDraft: (host: string, port: number, user: string, keyPath: string, proxyJump: string): Promise<ServerHealth> => {
+    const fn = wailsApp()?.CheckServerDraft
+    return fn ? fn(host, port, user, keyPath, proxyJump).then(normalizeServerHealth) : Promise.resolve(normalizeServerHealth(null))
   },
   keyPermissionWarning: (id: string): Promise<string> => wailsApp()?.KeyPermissionWarning?.(id) || Promise.resolve(''),
   fixServerKeyPermissions: (id: string): Promise<void> => {
@@ -849,6 +1089,76 @@ export const api = {
   listServerContainers: (id: string): Promise<RemoteContainer[]> => {
     const fn = wailsApp()?.ListServerContainers
     return fn ? fn(id).then(normalizeRemoteContainers) : Promise.resolve([])
+  },
+  listServerCron: (id: string): Promise<CronJob[]> => {
+    const fn = wailsApp()?.ListServerCron
+    return fn ? fn(id).then(normalizeCronJobs) : Promise.resolve([])
+  },
+  setServerCronEnabled: (id: string, line: number, enabled: boolean): Promise<void> => {
+    const fn = wailsApp()?.SetServerCronEnabled
+    return fn ? fn(id, line, enabled) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  removeServerCronLine: (id: string, line: number): Promise<void> => {
+    const fn = wailsApp()?.RemoveServerCronLine
+    return fn ? fn(id, line) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  listSSHConfigHosts: (): Promise<SSHConfigHost[]> => {
+    const fn = wailsApp()?.ListSSHConfigHosts
+    return fn ? fn().then(normalizeSSHConfigHosts) : Promise.resolve([])
+  },
+  listServerFiles: (id: string, remotePath: string): Promise<RemoteFile[]> => {
+    const fn = wailsApp()?.ListServerFiles
+    return fn ? fn(id, remotePath).then(normalizeRemoteFiles) : Promise.resolve([])
+  },
+  uploadServerFile: (id: string, localPath: string, remotePath: string): Promise<string> => {
+    const fn = wailsApp()?.UploadServerFile
+    return fn ? fn(id, localPath, remotePath) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  downloadServerFile: (id: string, remotePath: string, localDir: string): Promise<string> => {
+    const fn = wailsApp()?.DownloadServerFile
+    return fn ? fn(id, remotePath, localDir) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  pickUploadFile: (): Promise<string> => wailsApp()?.PickUploadFile?.() || Promise.resolve(''),
+  pickDownloadFolder: (): Promise<string> => wailsApp()?.PickDownloadFolder?.() || Promise.resolve(''),
+  runSecurityScan: (path: string): Promise<SecurityReport> => {
+    const fn = wailsApp()?.RunSecurityScan
+    return fn ? fn(path).then(normalizeSecurityReport) : Promise.resolve(normalizeSecurityReport(null))
+  },
+  getGitHookStatus: (repoPath: string): Promise<GitHookStatus> => {
+    const fn = wailsApp()?.GetGitHookStatus
+    return fn ? fn(repoPath).then(v => ({ pre_commit: Boolean(v?.pre_commit), pre_push: Boolean(v?.pre_push) })) : Promise.resolve({ pre_commit: false, pre_push: false })
+  },
+  installGitHook: (repoPath: string, kind: 'pre-commit' | 'pre-push'): Promise<void> => {
+    const fn = wailsApp()?.InstallGitHook
+    return fn ? fn(repoPath, kind) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  uninstallGitHook: (repoPath: string, kind: 'pre-commit' | 'pre-push'): Promise<void> => {
+    const fn = wailsApp()?.UninstallGitHook
+    return fn ? fn(repoPath, kind) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  runSecurityScanAll: (paths: string[]): Promise<SecurityReport[]> => {
+    const fn = wailsApp()?.RunSecurityScanAll
+    return fn ? fn(paths).then(reports => (Array.isArray(reports) ? reports : []).map(r => normalizeSecurityReport(r))) : Promise.resolve([])
+  },
+  openFileAtLine: (root: string, file: string, line: number): Promise<void> => {
+    const fn = wailsApp()?.OpenFileAtLine
+    return fn ? fn(root, file, line) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  revealFileInFinder: (root: string, file: string): Promise<void> => {
+    const fn = wailsApp()?.RevealFileInFinder
+    return fn ? fn(root, file) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  scanContainerImage: (image: string): Promise<SecurityReport> => {
+    const fn = wailsApp()?.ScanContainerImage
+    return fn ? fn(image).then(normalizeSecurityReport) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  getTerminalHistory: (serverId: string): Promise<string[]> => {
+    const fn = wailsApp()?.GetTerminalHistory
+    return fn ? fn(serverId).then(v => Array.isArray(v) ? v : []) : Promise.resolve([])
+  },
+  appendTerminalHistory: (serverId: string, command: string): Promise<void> => {
+    const fn = wailsApp()?.AppendTerminalHistory
+    return fn ? fn(serverId, command) : Promise.resolve()
   },
   serverContainerLogs: (id: string, containerId: string): Promise<string> => {
     const fn = wailsApp()?.ServerContainerLogs
@@ -888,7 +1198,7 @@ export const api = {
   stopProcess: (pid: number) => wailsApp()?.StopProcess?.(pid) || Promise.resolve(),
   stopContainer: (id: string) => wailsApp()?.StopContainer?.(id) || Promise.resolve(),
   startContainer: (id: string) => wailsApp()?.StartContainer?.(id) || Promise.resolve(),
-  getActivity: () => wailsApp()?.GetActivity?.() || Promise.resolve(normalizeActivity(null)),
+  getActivity: (force = false) => wailsApp()?.GetActivity?.(force) || Promise.resolve(normalizeActivity(null)),
   ignoreRepository: (path: string) => wailsApp()?.IgnoreRepository?.(path) || Promise.resolve(normalizeActivity(null)),
   trackRepository: (path: string) => wailsApp()?.TrackRepository?.(path) || Promise.resolve(normalizeActivity(null)),
   setMineOnly: (enabled: boolean) => wailsApp()?.SetMineOnly?.(enabled) || Promise.resolve(normalizeActivity(null)),
@@ -927,10 +1237,13 @@ export const api = {
   githubLogout: () => wailsApp()?.GitHubLogout?.() || Promise.resolve(),
   githubCLIInstalled: (): Promise<boolean> => wailsApp()?.GitHubCLIInstalled?.() || Promise.resolve(false),
   connectGitHubCLI: () => wailsApp()?.InstallAndLoginGitHubCLI?.() || Promise.reject('native not available'),
+  githubCLIAccounts: (): Promise<GitHubCLIAccount[]> => wailsApp()?.GitHubCLIAccounts?.() || Promise.resolve([]),
+  switchGitHubCLIAccount: (login: string) => wailsApp()?.SwitchGitHubCLIAccount?.(login) || Promise.reject('native not available'),
   repoGraph: (path: string, limit: number): Promise<GraphCommit[]> => wailsApp()?.RepoGraph?.(path, limit) || Promise.resolve([]),
   fetchRepo: (path: string) => wailsApp()?.FetchRepo?.(path) || Promise.resolve(),
   pullRepo: (path: string) => wailsApp()?.PullRepo?.(path) || Promise.resolve(),
   pushRepo: (path: string) => wailsApp()?.PushRepo?.(path) || Promise.resolve(),
+  pushBranch: (path: string, branch: string) => wailsApp()?.PushBranch?.(path, branch) || Promise.reject('native not available'),
   stashSave: (path: string) => wailsApp()?.StashSave?.(path) || Promise.resolve(),
   stashPop: (path: string) => wailsApp()?.StashPop?.(path) || Promise.resolve(),
   stashList: (path: string): Promise<string[]> => wailsApp()?.StashList?.(path) || Promise.resolve([]),
@@ -953,8 +1266,12 @@ export const api = {
   reopenPullRequest: (path: string, num: number) => wailsApp()?.ReopenPullRequest?.(path, num) || Promise.reject('native not available'),
   markPullRequestReadyForReview: (path: string, num: number) => wailsApp()?.MarkPullRequestReadyForReview?.(path, num) || Promise.reject('native not available'),
   requestReviewers: (path: string, num: number, reviewers: string[]) => wailsApp()?.RequestReviewers?.(path, num, reviewers) || Promise.reject('native not available'),
+  removeReviewers: (path: string, num: number, reviewers: string[]) => wailsApp()?.RemoveReviewers?.(path, num, reviewers) || Promise.reject('native not available'),
+  addAssignees: (path: string, num: number, assignees: string[]) => wailsApp()?.AddAssignees?.(path, num, assignees) || Promise.reject('native not available'),
+  removeAssignees: (path: string, num: number, assignees: string[]) => wailsApp()?.RemoveAssignees?.(path, num, assignees) || Promise.reject('native not available'),
   setPullRequestLabels: (path: string, num: number, labels: string[]) => wailsApp()?.SetPullRequestLabels?.(path, num, labels) || Promise.reject('native not available'),
   listRepositoryLabels: (path: string): Promise<string[]> => wailsApp()?.ListRepositoryLabels?.(path) || Promise.resolve([]),
+  listRepositoryCollaborators: (path: string): Promise<string[]> => wailsApp()?.ListRepositoryCollaborators?.(path) || Promise.resolve([]),
   createPullRequest: (path: string, base: string, head: string, title: string, body: string, draft: boolean): Promise<PullRequest> =>
     wailsApp()?.CreatePullRequest?.(path, base, head, title, body, draft) || Promise.reject('native not available'),
   pullRequestCommits: (path: string, num: number): Promise<PullRequestCommit[]> => wailsApp()?.PullRequestCommits?.(path, num) || Promise.resolve([]),
@@ -965,4 +1282,12 @@ export const api = {
     wailsApp()?.CreateReviewComment?.(path, num, commitID, filePath, line, side, startLine, startSide, body) || Promise.reject('native not available'),
   replyToReviewComment: (path: string, num: number, commentID: number, body: string) =>
     wailsApp()?.ReplyToReviewComment?.(path, num, commentID, body) || Promise.reject('native not available'),
+  listEnvFiles: (): Promise<EnvFileSummary[]> => wailsApp()?.ListEnvFiles?.() || Promise.resolve([]),
+  getEnvValue: (projectPath: string, fileName: string, key: string): Promise<string> =>
+    wailsApp()?.GetEnvValue?.(projectPath, fileName, key) || Promise.reject('native not available'),
+  getEnvFileContent: (projectPath: string, fileName: string): Promise<string> =>
+    wailsApp()?.GetEnvFileContent?.(projectPath, fileName) || Promise.reject('native not available'),
+  listConfigFiles: (): Promise<ConfigFileEntry[]> => wailsApp()?.ListConfigFiles?.() || Promise.resolve([]),
+  toggleConfigFile: (path: string): Promise<boolean> =>
+    wailsApp()?.ToggleConfigFile?.(path) || Promise.reject('native not available'),
 }

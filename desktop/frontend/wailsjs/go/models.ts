@@ -1,3 +1,30 @@
+export namespace cron {
+	
+	export class Job {
+	    line: number;
+	    schedule: string;
+	    command: string;
+	    disabled: boolean;
+	    source: string;
+	    env?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Job(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.line = source["line"];
+	        this.schedule = source["schedule"];
+	        this.command = source["command"];
+	        this.disabled = source["disabled"];
+	        this.source = source["source"];
+	        this.env = source["env"];
+	    }
+	}
+
+}
+
 export namespace discovery {
 	
 	export class Service {
@@ -14,6 +41,7 @@ export namespace discovery {
 	    project?: string;
 	    labels?: Record<string, string>;
 	    image?: string;
+	    engine?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Service(source);
@@ -34,6 +62,7 @@ export namespace discovery {
 	        this.project = source["project"];
 	        this.labels = source["labels"];
 	        this.image = source["image"];
+	        this.engine = source["engine"];
 	    }
 	}
 
@@ -245,6 +274,34 @@ export namespace main {
 	        this.power_source = source["power_source"];
 	    }
 	}
+	export class BrewPackages {
+	    formulae: string[];
+	    casks: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BrewPackages(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.formulae = source["formulae"];
+	        this.casks = source["casks"];
+	    }
+	}
+	export class BrewSearchResult {
+	    name: string;
+	    is_cask: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BrewSearchResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.is_cask = source["is_cask"];
+	    }
+	}
 	export class CPUStats {
 	    user_percent: number;
 	    system_percent: number;
@@ -350,6 +407,7 @@ export namespace main {
 	    user: string;
 	    key_path: string;
 	    environment?: string;
+	    proxy_jump?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ServerConnection(source);
@@ -364,6 +422,7 @@ export namespace main {
 	        this.user = source["user"];
 	        this.key_path = source["key_path"];
 	        this.environment = source["environment"];
+	        this.proxy_jump = source["proxy_jump"];
 	    }
 	}
 	export class ConfigBackup {
@@ -408,6 +467,36 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ConfigFileEntry {
+	    id: string;
+	    category: string;
+	    name: string;
+	    path: string;
+	    source_name?: string;
+	    exists: boolean;
+	    enabled: boolean;
+	    toggleable: boolean;
+	    description: string;
+	    detected_value?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigFileEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.category = source["category"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.source_name = source["source_name"];
+	        this.exists = source["exists"];
+	        this.enabled = source["enabled"];
+	        this.toggleable = source["toggleable"];
+	        this.description = source["description"];
+	        this.detected_value = source["detected_value"];
+	    }
+	}
 	export class DeviceCode {
 	    user_code: string;
 	    verification_uri: string;
@@ -446,6 +535,24 @@ export namespace main {
 	        this.used_percent = source["used_percent"];
 	    }
 	}
+	export class EnvFileSummary {
+	    project_path: string;
+	    project_name: string;
+	    file_name: string;
+	    keys: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new EnvFileSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.project_path = source["project_path"];
+	        this.project_name = source["project_name"];
+	        this.file_name = source["file_name"];
+	        this.keys = source["keys"];
+	    }
+	}
 	export class FileChange {
 	    path: string;
 	    status: string;
@@ -481,6 +588,34 @@ export namespace main {
 	    }
 	}
 	
+	export class GitHookStatus {
+	    pre_commit: boolean;
+	    pre_push: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHookStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pre_commit = source["pre_commit"];
+	        this.pre_push = source["pre_push"];
+	    }
+	}
+	export class GitHubCLIAccount {
+	    login: string;
+	    active: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHubCLIAccount(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.login = source["login"];
+	        this.active = source["active"];
+	    }
+	}
 	export class GitHubStatus {
 	    configured: boolean;
 	    authenticated: boolean;
@@ -878,6 +1013,7 @@ export namespace main {
 	    base_ref: string;
 	    labels?: string[];
 	    requested_reviewers?: string[];
+	    assignees?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new PullRequestDetail(source);
@@ -900,6 +1036,7 @@ export namespace main {
 	        this.base_ref = source["base_ref"];
 	        this.labels = source["labels"];
 	        this.requested_reviewers = source["requested_reviewers"];
+	        this.assignees = source["assignees"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -960,6 +1097,20 @@ export namespace main {
 	        this.search = source["search"];
 	    }
 	}
+	export class RegistryPackage {
+	    name: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RegistryPackage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	    }
+	}
 	export class RemoteContainer {
 	    id: string;
 	    name: string;
@@ -994,6 +1145,24 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.status = source["status"];
+	    }
+	}
+	export class RemoteFile {
+	    name: string;
+	    is_dir: boolean;
+	    size: number;
+	    mod_time: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RemoteFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.is_dir = source["is_dir"];
+	        this.size = source["size"];
+	        this.mod_time = source["mod_time"];
 	    }
 	}
 	export class RepoBranch {
@@ -1145,11 +1314,35 @@ export namespace main {
 	        this.in_reply_to = source["in_reply_to"];
 	    }
 	}
+	export class SSHConfigHost {
+	    alias: string;
+	    host: string;
+	    port: number;
+	    user: string;
+	    key_path: string;
+	    proxy_jump?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SSHConfigHost(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.user = source["user"];
+	        this.key_path = source["key_path"];
+	        this.proxy_jump = source["proxy_jump"];
+	    }
+	}
 	
 	export class ServerHealth {
 	    reachable: boolean;
 	    uptime: string;
+	    cpu_percent: number;
 	    memory: string;
+	    mem_percent: number;
 	    disk: string;
 	    disk_percent: number;
 	    docker_available: boolean;
@@ -1165,7 +1358,9 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.reachable = source["reachable"];
 	        this.uptime = source["uptime"];
+	        this.cpu_percent = source["cpu_percent"];
 	        this.memory = source["memory"];
+	        this.mem_percent = source["mem_percent"];
 	        this.disk = source["disk"];
 	        this.disk_percent = source["disk_percent"];
 	        this.docker_available = source["docker_available"];
@@ -1199,6 +1394,7 @@ export namespace main {
 	    projects: ProjectGroup[];
 	    anomalies: Anomaly[];
 	    scanned_at: string;
+	    docker_status?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
@@ -1212,6 +1408,7 @@ export namespace main {
 	        this.projects = this.convertValues(source["projects"], ProjectGroup);
 	        this.anomalies = this.convertValues(source["anomalies"], Anomaly);
 	        this.scanned_at = source["scanned_at"];
+	        this.docker_status = source["docker_status"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1358,6 +1555,94 @@ export namespace main {
 	        this.release_url = source["release_url"];
 	        this.error = source["error"];
 	    }
+	}
+
+}
+
+export namespace security {
+	
+	export class Finding {
+	    scanner: string;
+	    tool: string;
+	    severity: string;
+	    title: string;
+	    detail?: string;
+	    file?: string;
+	    line?: number;
+	    rule_id?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Finding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scanner = source["scanner"];
+	        this.tool = source["tool"];
+	        this.severity = source["severity"];
+	        this.title = source["title"];
+	        this.detail = source["detail"];
+	        this.file = source["file"];
+	        this.line = source["line"];
+	        this.rule_id = source["rule_id"];
+	    }
+	}
+	export class ScannerStatus {
+	    scanner: string;
+	    tool?: string;
+	    skipped: boolean;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScannerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scanner = source["scanner"];
+	        this.tool = source["tool"];
+	        this.skipped = source["skipped"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class Report {
+	    path: string;
+	    // Go type: time
+	    scanned_at: any;
+	    findings: Finding[];
+	    statuses: ScannerStatus[];
+	    counts: Record<string, number>;
+	
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.scanned_at = this.convertValues(source["scanned_at"], null);
+	        this.findings = this.convertValues(source["findings"], Finding);
+	        this.statuses = this.convertValues(source["statuses"], ScannerStatus);
+	        this.counts = source["counts"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

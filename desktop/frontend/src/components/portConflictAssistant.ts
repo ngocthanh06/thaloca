@@ -6,6 +6,7 @@ import type { PortUsage } from '../api'
 import { api } from '../api'
 import { copyToClipboard } from '../clipboard'
 import { escapeHTML } from '../dom'
+import { t } from '../i18n'
 
 // Matches Docker's various "port already taken" error phrasings, e.g.
 // "Bind for 0.0.0.0:8080 failed: port is already allocated" or
@@ -30,7 +31,7 @@ export function showPortConflictAssistant(port: number, owner: PortUsage, onReso
     })
   }
 
-  const ownerLabel = owner.name || owner.process || (owner.pid ? `PID ${owner.pid}` : 'unknown process')
+  const ownerLabel = owner.name || owner.process || (owner.pid ? `${t('PID')} ${owner.pid}` : t('unknown process'))
   // A usable target needs either a container ID or a positive PID — a bare
   // process name with no PID (or PID 0/undefined) has no safe action:
   // `kill 0` sends the signal to the whole process group, not one process.
@@ -41,16 +42,16 @@ export function showPortConflictAssistant(port: number, owner: PortUsage, onReso
   root.innerHTML = `
     <div class="settings-box">
       <header>
-        <h2>Port ${port} is already in use</h2>
-        <button class="btn-secondary" data-port-conflict-close>Close</button>
+        <h2>${t('Port')} ${port} ${t('is already in use')}</h2>
+        <button class="btn-secondary" data-port-conflict-close>${t('Close')}</button>
       </header>
-      <p class="resource-detail">Port ${port} is currently held by <strong>${escapeHTML(ownerLabel)}</strong>${owner.project ? ` (project ${escapeHTML(owner.project)})` : ''}.</p>
+      <p class="resource-detail">${t('Port')} ${port} ${t('is currently held by')} <strong>${escapeHTML(ownerLabel)}</strong>${owner.project ? ` (${t('project')} ${escapeHTML(owner.project)})` : ''}.</p>
       ${hasTarget ? `
         <div class="settings-buttons">
-          <button class="repo-action danger" data-port-conflict-stop>Stop it</button>
-          <button class="btn-secondary" data-port-conflict-copy>Copy command</button>
+          <button class="repo-action danger" data-port-conflict-stop>${t('Stop it')}</button>
+          <button class="btn-secondary" data-port-conflict-copy>${t('Copy command')}</button>
         </div>` : `
-        <p class="resource-detail muted">No PID or container ID available for it — stop it by hand.</p>`}
+        <p class="resource-detail muted">${t('No PID or container ID available for it — stop it by hand.')}</p>`}
     </div>`
 
   root.querySelector('[data-port-conflict-close]')?.addEventListener('click', close)

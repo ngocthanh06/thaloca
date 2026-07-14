@@ -23,6 +23,18 @@ func (a *App) PushRepo(repo string) error {
 	return runGitCommand(repo, 180*time.Second, "push")
 }
 
+// PushBranch pushes one specific local branch to origin and sets it to track
+// the remote branch. Used before creating a pull request: GitHub requires
+// the head branch to already exist on the remote, and the branch being
+// proposed isn't necessarily the one currently checked out, so plain
+// PushRepo (which only pushes the current branch) isn't enough.
+func (a *App) PushBranch(repo, branch string) error {
+	if err := validBranchName(branch); err != nil {
+		return err
+	}
+	return runGitCommand(repo, 180*time.Second, "push", "-u", "origin", "--", strings.TrimSpace(branch))
+}
+
 func (a *App) StashSave(repo string) error {
 	return runGitCommand(repo, 30*time.Second, "stash", "push", "--include-untracked")
 }

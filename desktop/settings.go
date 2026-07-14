@@ -25,10 +25,14 @@ type userSettings struct {
 	IgnoredRepos map[string]bool `json:"ignored_repos"`
 	EventRepos   map[string]bool `json:"event_repos"`
 	MineOnly     bool            `json:"mine_only"`
+	// ClipboardHistoryEnabled gates pollSystemClipboard (clipboardHistory.go)
+	// — it captures copies made in ANY app, not just Thaloca, so it defaults
+	// to on (existing behavior) but must be possible to turn off entirely.
+	ClipboardHistoryEnabled bool `json:"clipboard_history_enabled"`
 }
 
 func defaultUserSettings() userSettings {
-	return userSettings{IgnoredRepos: map[string]bool{}, EventRepos: map[string]bool{}, MineOnly: true}
+	return userSettings{IgnoredRepos: map[string]bool{}, EventRepos: map[string]bool{}, MineOnly: true, ClipboardHistoryEnabled: true}
 }
 
 func loadUserSettings() userSettings {

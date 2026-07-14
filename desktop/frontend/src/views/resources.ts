@@ -63,12 +63,12 @@ function renderAppsList(apps: InstalledApp[], searchQuery: string): string {
   if (!filtered.length) {
     return `<div class="empty compact">No applications match your search.</div>`
   }
-  // Running apps first (heaviest CPU first among those), then everything
-  // else alphabetically — mirrors the "what's using resources right now"
-  // framing the Processes table already has.
+  // Running apps first, then everything else — both groups alphabetical so
+  // a row's position stays fixed between refreshes. Sorting the running
+  // group by its live CPU% used to reshuffle rows on every poll, making
+  // Quit/Open easy to misclick.
   const sorted = [...filtered].sort((a, b) => {
     if (a.running !== b.running) return a.running ? -1 : 1
-    if (a.running && b.running) return b.cpu_percent - a.cpu_percent
     return a.name.localeCompare(b.name)
   })
   return `<div class="resource-list">${sorted.map(renderAppRow).join('')}</div>`

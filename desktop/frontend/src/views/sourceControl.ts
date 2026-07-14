@@ -10,12 +10,13 @@
 // name; this module does not bind its own document listeners.
 import { api } from '../api'
 import type {
-  ActivitySummary, RepositoryActivity, Commit, RepoBranch, GitHubStatus,
+  ActivitySummary, RepositoryActivity, Commit, RepoBranch, GitHubStatus, GitHubCLIAccount,
   DeviceCode, GraphCommit, PullRequest, PullRequestDetail, PullRequestFilter, PullRequestCounts,
   PullRequestCommit, CheckRun, PullRequestFile, ReviewComment, RepoEntry,
-  FileChange, CommitFile,
+  FileChange, CommitFile, SecurityReport, GitHookStatus,
 } from '../api'
 import { escapeHTML, formatBytes, formatDate, getSourceBadgeClass, showError } from '../dom'
+import { groupFindings, renderFindingGroup, renderScannerStatusRow } from './security'
 
 export const ACTIVITY_REFRESH_EVENT = 'thaloca:activity-refresh'
 
@@ -53,7 +54,7 @@ export type { RepoDetail }
 
 let sourceRepoFilter = ''
 interface RepoDetail {
-  tab: 'changes' | 'history' | 'graph' | 'branches' | 'files' | 'prs'
+  tab: 'changes' | 'history' | 'graph' | 'branches' | 'files' | 'prs' | 'security'
   graph?: GraphCommit[]
   graphLimit?: number
   stashes?: string[]
@@ -67,6 +68,7 @@ interface RepoDetail {
   entries?: RepoEntry[]
   file?: string
   fileContent?: string
+  fileMaximized?: boolean
   gh?: GitHubStatus
   prs?: PullRequest[]
   pr?: PullRequestDetail
@@ -74,8 +76,11 @@ interface RepoDetail {
   prCounts?: PullRequestCounts
   prAuthors?: string[]
   repoLabels?: string[]
+  repoCollaborators?: string[]
   prNewFormOpen?: boolean
   labelEditorOpen?: boolean
+  reviewerEditorOpen?: boolean
+  assigneeEditorOpen?: boolean
   prDiffView?: 'split' | 'unified'
   // Split/unified preference for the read-only diffs in Changes/History/
   // Graph (separate from prDiffView, which is PR-review-specific and also
@@ -104,7 +109,19 @@ interface RepoDetail {
   commitFiles?: CommitFile[]
   commitFilePath?: string
   commitFileDiff?: string
+  // Security tab: gitHookStatus is fetched whenever the tab opens (just two
+  // file-existence checks); securityReport only appears after an explicit
+  // "Scan now" click, since a real scan (gitleaks/trivy/gosec/semgrep) can
+  // take well past what auto-loading a tab should block on.
+  gitHookStatus?: GitHookStatus
+  securityReport?: SecurityReport
+  securityScanning?: boolean
   loading: boolean
+  // Bumped by loadRepoTab/refreshPullRequests on every call; a call whose
+  // token no longer matches by the time its awaits resolve was superseded
+  // by a newer one (e.g. rapid tab switching) and must not overwrite state
+  // with its now-stale result.
+  loadToken?: number
 }
 const repoDetails = new Map<string, RepoDetail>()
 export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
@@ -112,23 +129,42 @@ export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
   if (!detail) return
   detail.tab = tab
   detail.loading = true
+  const token = (detail.loadToken = (detail.loadToken || 0) + 1)
+  const stale = () => detail.loadToken !== token
   renderSource()
   try {
     if (tab === 'changes') {
       // Always re-read: the working tree changes outside the app.
-      detail.changes = (await api.gitChanges(path)) || []
-      detail.stashes = (await api.stashList(path)) || []
+      const changes = (await api.gitChanges(path)) || []
+      const stashes = (await api.stashList(path)) || []
+      if (stale()) return
+      detail.changes = changes
+      detail.stashes = stashes
     } else if (tab === 'graph') {
-      detail.graph = (await api.repoGraph(path, detail.graphLimit || 120)) || []
+      const graph = (await api.repoGraph(path, detail.graphLimit || 120)) || []
+      if (stale()) return
+      detail.graph = graph
     } else if (tab === 'history' && !detail.commits) {
-      detail.commits = (await api.repoCommits(path, 100, 0)) || []
-      detail.historyDone = detail.commits.length < 100
+      const commits = (await api.repoCommits(path, 100, 0)) || []
+      if (stale()) return
+      detail.commits = commits
+      detail.historyDone = commits.length < 100
     } else if (tab === 'branches') {
-      detail.branches = (await api.repoBranches(path)) || []
+      const branches = (await api.repoBranches(path)) || []
+      if (stale()) return
+      detail.branches = branches
     } else if (tab === 'files' && !detail.entries) {
-      detail.entries = (await api.repoFiles(path, detail.dir)) || []
+      const entries = (await api.repoFiles(path, detail.dir)) || []
+      if (stale()) return
+      detail.entries = entries
+    } else if (tab === 'security') {
+      const gitHookStatus = await api.getGitHookStatus(path)
+      if (stale()) return
+      detail.gitHookStatus = gitHookStatus
     } else if (tab === 'prs') {
-      detail.gh = await api.githubStatus(path)
+      const gh = await api.githubStatus(path)
+      if (stale()) return
+      detail.gh = gh
       if (detail.gh?.authenticated && detail.gh?.repo) {
         if (!detail.prFilter) detail.prFilter = { state: 'open' }
         const filter = detail.prFilter
@@ -141,6 +177,7 @@ export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
           api.listPullRequests(path, filter),
           api.countPullRequests(path, filter),
         ])
+        if (stale()) return
         detail.prAuthors = authors || []
         detail.repoLabels = labels || []
         detail.prs = prs || []
@@ -148,8 +185,9 @@ export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
       }
     }
   } catch (error) {
-    showError(String(error))
+    if (!stale()) showError(String(error))
   }
+  if (stale()) return
   detail.loading = false
   renderSource()
 }
@@ -162,16 +200,19 @@ export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
 async function refreshPullRequests(path: string, skipRender = false): Promise<void> {
   const detail = repoDetails.get(path)
   if (!detail) return
+  const token = (detail.loadToken = (detail.loadToken || 0) + 1)
   try {
     const filter = detail.prFilter || {}
     const [prs, counts] = await Promise.all([
       api.listPullRequests(path, filter),
       api.countPullRequests(path, filter),
     ])
+    if (detail.loadToken !== token) return
     detail.prs = prs || []
     detail.prCounts = counts
   } catch (error) {
-    showError(String(error))
+    if (detail.loadToken === token) showError(String(error))
+    return
   }
   if (skipRender) return
   renderSource()
@@ -354,7 +395,7 @@ export async function handleBranchAction(button: HTMLButtonElement) {
       await api.switchBranch(repo, branch)
       if (detail) detail.commits = undefined
     } else if (button.dataset.branchMerge) {
-      if (!(await api.confirmDialog('Merge branch', `Merge "${branch}" into the current branch? On conflicts the merge is aborted automatically.`))) return
+      if (!(await api.confirmDialog('Merge branch', `Merge "${branch}" into the current branch? On conflicts, the merge stays open so you can resolve them in the Changes tab, then commit to finish it.`))) return
       await api.mergeBranch(repo, branch)
       if (detail) detail.commits = undefined
     } else if (button.dataset.branchDelete) {
@@ -364,6 +405,11 @@ export async function handleBranchAction(button: HTMLButtonElement) {
   } catch (error) {
     showError(String(error))
   }
+  // Switching/merging changes the sidebar's current-branch label and
+  // ahead/behind counts — same refresh handleSyncAction fires after
+  // fetch/pull/push, otherwise the sidebar keeps showing the old branch
+  // until the next full Refresh.
+  document.dispatchEvent(new CustomEvent(ACTIVITY_REFRESH_EVENT))
   await loadRepoTab(repo, 'branches')
 }
 
@@ -374,6 +420,12 @@ export async function handleFileAction(button: HTMLButtonElement) {
   if (button.dataset.fileClose) {
     detail.file = undefined
     detail.fileContent = undefined
+    detail.fileMaximized = false
+    renderSource()
+    return
+  }
+  if (button.dataset.fileMaximize) {
+    detail.fileMaximized = !detail.fileMaximized
     renderSource()
     return
   }
@@ -394,6 +446,7 @@ export async function handleFileAction(button: HTMLButtonElement) {
   detail.entries = undefined
   detail.file = undefined
   detail.fileContent = undefined
+  detail.fileMaximized = false
   await loadRepoTab(repo, 'files')
 }
 
@@ -444,6 +497,13 @@ export async function handlePRAction(button: HTMLButtonElement) {
         showError(String(error))
       }
     }
+    if (detail.prNewFormOpen && !detail.repoCollaborators) {
+      try {
+        detail.repoCollaborators = (await api.listRepositoryCollaborators(repo)) || []
+      } catch (error) {
+        showError(String(error))
+      }
+    }
     renderSource()
     return
   }
@@ -461,6 +521,10 @@ export async function handlePRAction(button: HTMLButtonElement) {
     const title = (form?.querySelector('.pr-new-title') as HTMLInputElement | null)?.value.trim() || ''
     const prBody = (form?.querySelector('.pr-new-body') as HTMLTextAreaElement | null)?.value || ''
     const draft = (form?.querySelector('.pr-new-draft-checkbox') as HTMLInputElement | null)?.checked || false
+    const reviewers: string[] = []
+    form?.querySelectorAll<HTMLInputElement>('.pr-new-reviewer-checkbox:checked').forEach(cb => reviewers.push(cb.value))
+    const assignees: string[] = []
+    form?.querySelectorAll<HTMLInputElement>('.pr-new-assignee-checkbox:checked').forEach(cb => assignees.push(cb.value))
     if (!title) {
       showError('Title is required.')
       return
@@ -470,13 +534,40 @@ export async function handlePRAction(button: HTMLButtonElement) {
       return
     }
     button.disabled = true
+    const originalLabel = button.textContent
     try {
-      await api.createPullRequest(repo, base, head, title, prBody, draft)
+      // GitHub requires the head branch to already exist on the remote —
+      // push it first (idempotent: a no-op if it's already up to date)
+      // instead of surfacing a confusing "Validation Failed" from the PR
+      // creation call itself when the branch was never pushed.
+      button.textContent = 'Pushing branch…'
+      await api.pushBranch(repo, head)
+      button.textContent = 'Creating pull request…'
+      const pr = await api.createPullRequest(repo, base, head, title, prBody, draft)
+      // The PR itself is already created at this point — a reviewer/assignee
+      // request failing (e.g. an invalid login) shouldn't be reported as if
+      // PR creation failed, so these run best-effort with their own errors.
+      if (reviewers.length) {
+        try { await api.requestReviewers(repo, pr.number, reviewers) } catch (error) { showError(`PR #${pr.number} created, but requesting reviewers failed: ${error}`) }
+      }
+      if (assignees.length) {
+        try { await api.addAssignees(repo, pr.number, assignees) } catch (error) { showError(`PR #${pr.number} created, but adding assignees failed: ${error}`) }
+      }
       detail.prNewFormOpen = false
+      // Show the just-created PR immediately instead of waiting on a fresh
+      // list+count round trip to GitHub's API — refreshPullRequests still
+      // runs right after to reconcile with the server's actual state.
+      const filterState = detail.prFilter?.state || 'open'
+      if (filterState === 'open' || filterState === 'all') {
+        detail.prs = [pr, ...(detail.prs || [])]
+        if (detail.prCounts) detail.prCounts.open += 1
+      }
+      renderSource()
       await refreshPullRequests(repo)
     } catch (error) {
       showError(String(error))
       button.disabled = false
+      button.textContent = originalLabel
     }
     return
   }
@@ -582,18 +673,82 @@ export async function handlePRAction(button: HTMLButtonElement) {
     return
   }
 
-  if (button.dataset.prRequestReviewers) {
-    const num = Number(button.dataset.pr || 0)
-    const input = button.closest('.pr-reviewers-row')?.querySelector('.pr-reviewer-input') as HTMLInputElement | null
-    const reviewers = (input?.value || '').split(',').map(s => s.trim()).filter(Boolean)
-    if (!num || reviewers.length === 0) {
-      showError('Enter at least one GitHub username.')
-      return
+  if (button.dataset.prReviewersToggle) {
+    detail.reviewerEditorOpen = !detail.reviewerEditorOpen
+    if (detail.reviewerEditorOpen && !detail.repoCollaborators) {
+      try {
+        detail.repoCollaborators = (await api.listRepositoryCollaborators(repo)) || []
+      } catch (error) {
+        showError(String(error))
+      }
     }
+    renderSource()
+    return
+  }
+
+  if (button.dataset.prReviewersCancel) {
+    detail.reviewerEditorOpen = false
+    renderSource()
+    return
+  }
+
+  if (button.dataset.prReviewersSave) {
+    const num = Number(button.dataset.pr || 0)
+    if (!num) return
+    const editor = button.closest('.pr-reviewer-editor')
+    const selected = new Set<string>()
+    editor?.querySelectorAll<HTMLInputElement>('.pr-reviewer-checkbox:checked').forEach(cb => selected.add(cb.value))
+    const current = new Set(detail.pr?.requested_reviewers || [])
+    const toAdd = [...selected].filter(r => !current.has(r))
+    const toRemove = [...current].filter(r => !selected.has(r))
     button.disabled = true
     try {
-      await api.requestReviewers(repo, num, reviewers)
+      if (toAdd.length) await api.requestReviewers(repo, num, toAdd)
+      if (toRemove.length) await api.removeReviewers(repo, num, toRemove)
       detail.pr = await api.pullRequestDetail(repo, num)
+      detail.reviewerEditorOpen = false
+    } catch (error) {
+      showError(String(error))
+    }
+    button.disabled = false
+    renderSource()
+    return
+  }
+
+  if (button.dataset.prAssigneesToggle) {
+    detail.assigneeEditorOpen = !detail.assigneeEditorOpen
+    if (detail.assigneeEditorOpen && !detail.repoCollaborators) {
+      try {
+        detail.repoCollaborators = (await api.listRepositoryCollaborators(repo)) || []
+      } catch (error) {
+        showError(String(error))
+      }
+    }
+    renderSource()
+    return
+  }
+
+  if (button.dataset.prAssigneesCancel) {
+    detail.assigneeEditorOpen = false
+    renderSource()
+    return
+  }
+
+  if (button.dataset.prAssigneesSave) {
+    const num = Number(button.dataset.pr || 0)
+    if (!num) return
+    const editor = button.closest('.pr-assignee-editor')
+    const selected = new Set<string>()
+    editor?.querySelectorAll<HTMLInputElement>('.pr-assignee-checkbox:checked').forEach(cb => selected.add(cb.value))
+    const current = new Set(detail.pr?.assignees || [])
+    const toAdd = [...selected].filter(a => !current.has(a))
+    const toRemove = [...current].filter(a => !selected.has(a))
+    button.disabled = true
+    try {
+      if (toAdd.length) await api.addAssignees(repo, num, toAdd)
+      if (toRemove.length) await api.removeAssignees(repo, num, toRemove)
+      detail.pr = await api.pullRequestDetail(repo, num)
+      detail.assigneeEditorOpen = false
     } catch (error) {
       showError(String(error))
     }
@@ -799,6 +954,7 @@ function renderRepoDetail(repo: RepositoryActivity): string {
       <button class="subtab ${detail.tab === 'branches' ? 'active' : ''}" data-repo-tab="branches" data-repo="${path}">Branches</button>
       <button class="subtab ${detail.tab === 'files' ? 'active' : ''}" data-repo-tab="files" data-repo="${path}">Files</button>
       <button class="subtab ${detail.tab === 'prs' ? 'active' : ''}" data-repo-tab="prs" data-repo="${path}">Pull Requests</button>
+      <button class="subtab ${detail.tab === 'security' ? 'active' : ''}" data-repo-tab="security" data-repo="${path}">Security</button>
     </nav>`
 
   let body = ''
@@ -812,6 +968,8 @@ function renderRepoDetail(repo: RepositoryActivity): string {
     body = renderRepoHistory(repo, detail)
   } else if (detail.tab === 'graph') {
     body = renderRepoGraph(repo, detail)
+  } else if (detail.tab === 'security') {
+    body = renderRepoSecurity(repo, detail)
   } else if (detail.tab === 'branches') {
     const allBranches = detail.branches || []
     const filter = (detail.branchFilter || '').trim().toLowerCase()
@@ -852,10 +1010,14 @@ function renderRepoDetail(repo: RepositoryActivity): string {
         }).join('')}
       </div>
       ${detail.file !== undefined ? `
-        <div class="file-view">
+        ${detail.fileMaximized ? `<div class="file-view-backdrop" data-file-maximize="1" data-repo="${path}"></div>` : ''}
+        <div class="file-view${detail.fileMaximized ? ' maximized' : ''}">
           <header>
             <strong>${escapeHTML(detail.file)}</strong>
-            <button class="repo-action" data-file-close="1" data-repo="${path}">Close</button>
+            <span class="file-view-header-actions">
+              <button class="repo-action" data-file-maximize="1" data-repo="${path}">${detail.fileMaximized ? 'Restore' : 'Maximize'}</button>
+              <button class="repo-action" data-file-close="1" data-repo="${path}">Close</button>
+            </span>
           </header>
           <pre>${escapeHTML(detail.fileContent ?? '')}</pre>
         </div>` : `
@@ -1041,6 +1203,89 @@ function renderRepoGraph(repo: RepositoryActivity, detail: RepoDetail): string {
   return graphMain
 }
 
+// Security tab: secrets/vulnerability/static-analysis scanning (see
+// internal/security, desktop/security.go) plus pre-commit/pre-push git
+// hook install toggles. Runs entirely locally — nothing here uploads
+// anything. The hook status is cheap (two file-existence checks) so it's
+// fetched whenever the tab opens (loadRepoTab); the scan itself is only
+// ever run on an explicit "Scan now" click since gitleaks/trivy/gosec/
+// semgrep can take a while.
+function renderRepoSecurity(repo: RepositoryActivity, detail: RepoDetail): string {
+  const path = escapeHTML(repo.path)
+  const hooks = detail.gitHookStatus
+  const report = detail.securityReport
+
+  const hookRow = (kind: 'pre-commit' | 'pre-push', installed: boolean) => `
+    <div class="security-hook-row">
+      <div>
+        <strong>${kind === 'pre-commit' ? 'Pre-commit hook' : 'Pre-push hook'}</strong>
+        <span class="resource-detail muted">${kind === 'pre-commit' ? 'Scans on every commit — fails on high severity or above.' : 'Scans before every push — fails on critical severity only.'}</span>
+      </div>
+      <button class="btn-secondary" data-security-hook-toggle="${kind}" data-repo="${path}">${installed ? 'Uninstall' : 'Install'}</button>
+    </div>`
+
+  const scanButton = `<button class="btn-primary" data-security-scan="1" data-repo="${path}" ${detail.securityScanning ? 'disabled' : ''}>${detail.securityScanning ? 'Scanning…' : report ? 'Scan again' : 'Scan now'}</button>`
+
+  let resultsHTML: string
+  if (detail.securityScanning) {
+    resultsHTML = '<div class="empty compact">Running secrets, dependency-vulnerability, and static-analysis scanners — this can take a minute…</div>'
+  } else if (!report) {
+    resultsHTML = '<div class="empty compact">Not scanned yet this session. Click "Scan now" to check for secrets, known dependency vulnerabilities, and static-analysis issues.</div>'
+  } else {
+    const statusRow = report.statuses.map(renderScannerStatusRow).join('')
+    const findingsHTML = report.findings.length
+      ? `<div class="security-findings">${groupFindings(report.findings).map(g => renderFindingGroup(report.path, g)).join('')}</div>`
+      : '<div class="empty compact">No findings — looks clean.</div>'
+    resultsHTML = `<div class="security-tool-statuses">${statusRow}</div>${findingsHTML}`
+  }
+
+  return `
+    <div class="security-tab">
+      <p class="subview-desc">Runs entirely locally — nothing here leaves this machine. Uses gitleaks/trivy/gosec/semgrep if installed, with a built-in fallback for secret detection.</p>
+      <div class="security-hooks">
+        ${hookRow('pre-commit', Boolean(hooks?.pre_commit))}
+        ${hookRow('pre-push', Boolean(hooks?.pre_push))}
+      </div>
+      ${scanButton}
+      ${resultsHTML}
+    </div>`
+}
+
+export async function runSecurityScan(path: string): Promise<void> {
+  const detail = repoDetails.get(path)
+  if (!detail) return
+  detail.securityScanning = true
+  renderSource()
+  try {
+    detail.securityReport = await api.runSecurityScan(path)
+  } catch (error) {
+    showError(String(error))
+  }
+  detail.securityScanning = false
+  renderSource()
+}
+
+export async function toggleGitHook(path: string, kind: 'pre-commit' | 'pre-push'): Promise<void> {
+  const detail = repoDetails.get(path)
+  if (!detail) return
+  const installed = kind === 'pre-commit' ? detail.gitHookStatus?.pre_commit : detail.gitHookStatus?.pre_push
+  try {
+    if (installed) {
+      await api.uninstallGitHook(path, kind)
+    } else {
+      if (!(await api.confirmDialog(
+        `Install ${kind} hook`,
+        `This writes to .git/hooks/${kind} in this repo, adding a block that runs "thaloca scan" and can block a ${kind === 'pre-commit' ? 'commit' : 'push'} on findings. Any existing hook content is preserved — only Thaloca's own marked block is added/removed. Install it?`,
+      ))) return
+      await api.installGitHook(path, kind)
+    }
+    detail.gitHookStatus = await api.getGitHookStatus(path)
+  } catch (error) {
+    showError(String(error))
+  }
+  renderSource()
+}
+
 const changeStatusLabels: Record<string, string> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', '?': 'untracked', U: 'conflict' }
 
 function renderChangeRow(repo: string, change: FileChange, detail: RepoDetail): string {
@@ -1111,6 +1356,12 @@ let ghPollTimer: number | null = null
 // True while waiting for `gh auth login` to finish in the Terminal window
 // the CLI flow opened — there is no device code to show for this path.
 let ghCliWaiting = false
+// Every account gh is currently logged into on github.com, for the
+// in-app account switcher — only fetched once the active login turns out
+// to be via gh (fetching it otherwise would just fail with "not installed"
+// or be irrelevant for a Keychain/OAuth login).
+let ghCLIAccounts: GitHubCLIAccount[] | null = null
+let ghSwitchingAccount = false
 
 function stopGHPolling() {
   if (ghPollTimer) {
@@ -1127,6 +1378,36 @@ export async function refreshGHStatus() {
   } catch {
     ghStatus = null
   }
+  if (ghStatus?.authenticated && ghStatus.source === 'gh') {
+    try {
+      ghCLIAccounts = await api.githubCLIAccounts()
+    } catch {
+      ghCLIAccounts = null
+    }
+  } else {
+    ghCLIAccounts = null
+  }
+  renderGHConnect()
+}
+
+async function handleGHAccountSwitch(login: string): Promise<void> {
+  if (!login || ghSwitchingAccount) return
+  ghSwitchingAccount = true
+  try {
+    await api.switchGitHubCLIAccount(login)
+    // `gh auth status` already reports which account is now active, so
+    // there's no need for a second, separate network round trip (GET /user
+    // via githubStatus) just to re-confirm the same thing — and no need to
+    // dispatch ACTIVITY_REFRESH_EVENT either: ahead/behind/branch data is
+    // computed from local git state, not the GitHub account, so a full
+    // repo rescan here was pure unnecessary latency.
+    ghCLIAccounts = await api.githubCLIAccounts()
+    const active = ghCLIAccounts?.find(a => a.active)
+    if (ghStatus && active) ghStatus = { ...ghStatus, login: active.login }
+  } catch (error) {
+    showError(String(error))
+  }
+  ghSwitchingAccount = false
   renderGHConnect()
 }
 
@@ -1137,14 +1418,24 @@ function renderGHConnect() {
     // The gh CLI's active account always wins over Thaloca's own saved
     // login (see resolveGithubToken in desktop/github.go), so "Logout"
     // (which only clears Thaloca's Keychain entry) would silently do
-    // nothing while gh stays logged in — switch accounts with
-    // `gh auth switch` instead.
+    // nothing while gh stays logged in — switch the active gh account
+    // instead, via the picker below.
     const viaGH = ghStatus.source === 'gh'
-    area.innerHTML = viaGH
-      ? `<span class="gh-connected" title="Active gh CLI account">✓ ${escapeHTML(ghStatus.login || 'GitHub')} (via gh CLI)</span>
-         <span class="muted">Switch accounts with "gh auth switch" in a terminal.</span>`
-      : `<span class="gh-connected" title="Logged in via GitHub OAuth">✓ ${escapeHTML(ghStatus.login || 'GitHub')}</span>
+    if (viaGH) {
+      const accounts = ghCLIAccounts || []
+      area.innerHTML = `
+        <span class="gh-connected" title="Active gh CLI account">✓ ${escapeHTML(ghStatus.login || 'GitHub')} (via gh CLI)</span>
+        ${accounts.length > 1 ? `
+          <select class="search-input gh-account-switch" ${ghSwitchingAccount ? 'disabled' : ''}>
+            ${accounts.map(acc => `<option value="${escapeHTML(acc.login)}" ${acc.active ? 'selected' : ''}>${escapeHTML(acc.login)}</option>`).join('')}
+          </select>` : ''}`
+      area.querySelector('.gh-account-switch')?.addEventListener('change', event => {
+        void handleGHAccountSwitch((event.target as HTMLSelectElement).value)
+      })
+    } else {
+      area.innerHTML = `<span class="gh-connected" title="Logged in via GitHub OAuth">✓ ${escapeHTML(ghStatus.login || 'GitHub')}</span>
          <button class="repo-action" data-gh-logout="1">Logout</button>`
+    }
     return
   }
   if (!ghPanelOpen) {
@@ -1476,9 +1767,23 @@ function branchOptionList(branches: RepoBranch[] | undefined, selected: string):
   return names.map(name => `<option value="${escapeHTML(name)}" ${name === selected ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')
 }
 
+// Shared by the reviewer/assignee pickers on both the "New pull request"
+// form and an existing PR's editors — GitHub only allows requesting review
+// from or assigning a repo collaborator, so the picker is always this same
+// checkbox-over-collaborators shape, just with a different `selected` set.
+function renderCollaboratorCheckboxes(className: string, collaborators: string[], selected: Set<string>): string {
+  if (!collaborators.length) return '<span class="muted">No collaborators found for this repository.</span>'
+  return collaborators.map(c => `
+    <label class="pr-label-option">
+      <input type="checkbox" class="${className}" value="${escapeHTML(c)}" ${selected.has(c) ? 'checked' : ''}>
+      ${escapeHTML(c)}
+    </label>`).join('')
+}
+
 function renderPRNewForm(path: string, detail: RepoDetail): string {
   const escapedPath = escapeHTML(path)
   const branches = detail.branches || []
+  const collaborators = detail.repoCollaborators || []
   const current = branches.find(b => b.current)?.name || ''
   const defaultBase = branches.find(b => b.name === 'main' || b.name === 'master')?.name || (branches[0]?.name || '')
   return `
@@ -1492,6 +1797,16 @@ function renderPRNewForm(path: string, detail: RepoDetail): string {
       <input class="search-input pr-new-title" placeholder="Title">
       <textarea class="pr-comment-input pr-new-body" placeholder="Description (optional)"></textarea>
       <label class="pr-new-draft"><input type="checkbox" class="pr-new-draft-checkbox"> Create as draft</label>
+      <div class="pr-new-people">
+        <div class="pr-people-group">
+          <span class="muted">Reviewers</span>
+          ${renderCollaboratorCheckboxes('pr-new-reviewer-checkbox', collaborators, new Set())}
+        </div>
+        <div class="pr-people-group">
+          <span class="muted">Assignees</span>
+          ${renderCollaboratorCheckboxes('pr-new-assignee-checkbox', collaborators, new Set())}
+        </div>
+      </div>
       <div class="pr-action-buttons">
         <button class="repo-action" data-pr-new-cancel="1" data-repo="${escapedPath}">Cancel</button>
         <button class="repo-action" data-pr-new-submit="1" data-repo="${escapedPath}">Create pull request</button>
@@ -1542,6 +1857,36 @@ function renderLabelEditor(pr: PullRequestDetail, detail: RepoDetail, path: stri
     </div>`
 }
 
+function renderReviewerEditor(pr: PullRequestDetail, detail: RepoDetail, path: string): string {
+  const escapedPath = escapeHTML(path)
+  const collaborators = detail.repoCollaborators
+  if (!collaborators) return `<div class="pr-reviewer-editor"><span class="muted">Loading collaborators…</span></div>`
+  const current = new Set(pr.requested_reviewers || [])
+  return `
+    <div class="pr-reviewer-editor">
+      ${renderCollaboratorCheckboxes('pr-reviewer-checkbox', collaborators, current)}
+      <div class="pr-action-buttons">
+        <button class="repo-action" data-pr-reviewers-cancel="1" data-repo="${escapedPath}">Cancel</button>
+        <button class="repo-action" data-pr-reviewers-save="1" data-pr="${pr.number}" data-repo="${escapedPath}">Save reviewers</button>
+      </div>
+    </div>`
+}
+
+function renderAssigneeEditor(pr: PullRequestDetail, detail: RepoDetail, path: string): string {
+  const escapedPath = escapeHTML(path)
+  const collaborators = detail.repoCollaborators
+  if (!collaborators) return `<div class="pr-assignee-editor"><span class="muted">Loading collaborators…</span></div>`
+  const current = new Set(pr.assignees || [])
+  return `
+    <div class="pr-assignee-editor">
+      ${renderCollaboratorCheckboxes('pr-assignee-checkbox', collaborators, current)}
+      <div class="pr-action-buttons">
+        <button class="repo-action" data-pr-assignees-cancel="1" data-repo="${escapedPath}">Cancel</button>
+        <button class="repo-action" data-pr-assignees-save="1" data-pr="${pr.number}" data-repo="${escapedPath}">Save assignees</button>
+      </div>
+    </div>`
+}
+
 // PR detail is a shell (header + Conversation/Commits/Checks/Files changed
 // tabs, matching github.com's own PR page) around whichever tab body is
 // currently active; each tab's data loads lazily on first visit (see
@@ -1586,9 +1931,14 @@ function renderPRConversationTab(pr: PullRequestDetail, path: string, detail: Re
       ${detail.labelEditorOpen ? renderLabelEditor(pr, detail, path) : ''}
       <div class="pr-reviewers-row">
         <span class="muted">Reviewers: ${(pr.requested_reviewers || []).map(r => escapeHTML(r)).join(', ') || 'none requested'}</span>
-        <input class="search-input pr-reviewer-input" placeholder="github-login, another-login">
-        <button class="repo-action" data-pr-request-reviewers="1" data-pr="${pr.number}" data-repo="${escapedPath}">Request review</button>
+        <button class="repo-action" data-pr-reviewers-toggle="1" data-repo="${escapedPath}">Edit reviewers</button>
       </div>
+      ${detail.reviewerEditorOpen ? renderReviewerEditor(pr, detail, path) : ''}
+      <div class="pr-assignees-row">
+        <span class="muted">Assignees: ${(pr.assignees || []).map(a => escapeHTML(a)).join(', ') || 'none'}</span>
+        <button class="repo-action" data-pr-assignees-toggle="1" data-repo="${escapedPath}">Edit assignees</button>
+      </div>
+      ${detail.assigneeEditorOpen ? renderAssigneeEditor(pr, detail, path) : ''}
       ${(pr.comments || []).length ? `
         <div class="pr-comments">
           ${(pr.comments || []).map(comment => `

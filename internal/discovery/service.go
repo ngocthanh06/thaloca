@@ -31,7 +31,8 @@ type Service struct {
 	Command     string            `json:"command"`
 	Project     string            `json:"project,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
-	Image       string            `json:"image,omitempty"` // docker only
+	Image       string            `json:"image,omitempty"`  // docker only
+	Engine      string            `json:"engine,omitempty"` // docker only — which docker context this container came from (e.g. "orbstack", "desktop-linux")
 }
 
 // healthProbePaths are well-known health endpoints tried in order when the
@@ -39,16 +40,116 @@ type Service struct {
 // answers its root is still reported as up.
 var healthProbePaths = health.ProbePaths
 
-// ScanDocker lists Docker containers (including stopped ones, so they can be
-// started again) as Service values.
-func ScanDocker(ctx context.Context) ([]Service, error) {
+// DockerContextStatus is one Docker context's scan result — lets callers
+// tell "this engine's containers are included" apart from "this engine
+// exists but couldn't be reached" instead of the two looking identical.
+type DockerContextStatus struct {
+	Context string
+	Error   string
+}
+
+// ScanDocker merges containers from every Docker context registered on this
+// machine (OrbStack, Docker Desktop, Colima, Rancher Desktop, ... —
+// anything `docker context ls` lists), tagging each container with which
+// one it came from (Service.Engine), and deduplicating by container ID in
+// case two contexts happen to point at the same daemon (common with
+// OrbStack, which also takes over the "default" context while it's
+// running). Includes stopped containers so they can be started again.
+//
+// A context that can't be reached (not running, stale, ...) is skipped
+// individually rather than failing the whole scan — its error comes back
+// in the second return value. The third return value (error) is only
+// non-nil when NOT ONE context could be reached (including the `docker`
+// CLI itself being missing), matching ScanDocker's old all-or-nothing
+// contract for existing callers that only check that.
+func ScanDocker(ctx context.Context) ([]Service, []DockerContextStatus, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		return nil, nil
+		return nil, nil, err
 	}
 
+	contexts, ctxErr := dockerContextNames(ctx)
+	if ctxErr != nil || len(contexts) == 0 {
+		// `docker context ls` failed (very old CLI, etc.) — fall back to
+		// whichever context is already active, same as before this existed.
+		services, err := scanDockerContext(ctx, "")
+		if err != nil {
+			return nil, nil, err
+		}
+		return services, nil, nil
+	}
+
+	var all []Service
+	seenContainers := map[string]bool{}
+	var statuses []DockerContextStatus
+	var lastErr error
+	reached := 0
+	for _, name := range contexts {
+		services, err := scanDockerContext(ctx, name)
+		if err != nil {
+			statuses = append(statuses, DockerContextStatus{Context: name, Error: DockerErrorDetail(err)})
+			lastErr = err
+			continue
+		}
+		reached++
+		for _, svc := range services {
+			if seenContainers[svc.ContainerID] {
+				continue
+			}
+			seenContainers[svc.ContainerID] = true
+			svc.Engine = name
+			all = append(all, svc)
+		}
+	}
+	if reached == 0 {
+		return nil, statuses, lastErr
+	}
+	return all, statuses, nil
+}
+
+// DockerErrorDetail extracts a short, human-readable reason from a failed
+// `docker` invocation — exec.Cmd.Output() populates *exec.ExitError.Stderr
+// with whatever the CLI printed (e.g. "Cannot connect to the Docker daemon
+// at unix:///var/run/docker.sock. Is the docker daemon running?"), which is
+// far more useful to show than the generic exit-status error alone.
+func DockerErrorDetail(err error) string {
+	if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+		msg := strings.TrimSpace(string(exitErr.Stderr))
+		if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+			msg = msg[:idx]
+		}
+		return msg
+	}
+	return err.Error()
+}
+
+// dockerContextNames lists every context `docker` knows about (OrbStack,
+// Docker Desktop, Colima, Rancher Desktop, ... register themselves this
+// way) — not just the currently active one.
+func dockerContextNames(ctx context.Context) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "context", "ls", "--format", "{{.Name}}").Output()
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
+// scanDockerContext runs `docker ps` against one context (or whatever is
+// currently active, if contextName is "") and parses the NDJSON output.
+func scanDockerContext(ctx context.Context, contextName string) ([]Service, error) {
+	var args []string
+	if contextName != "" {
+		args = append(args, "--context", contextName)
+	}
 	// -a includes stopped containers so they can be started from the UI.
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "json")
-	output, err := cmd.Output()
+	args = append(args, "ps", "-a", "--format", "json")
+	output, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -214,15 +315,21 @@ func Deduplicate(services []Service) []Service {
 	// A service keeps only the ports on which no other service sharing that
 	// port has a strictly higher-priority source (ties broken by whichever
 	// was seen first). This is checked across ALL of a service's ports
-	// before deciding what to include, so a service that wins one port but
-	// loses another doesn't resurface the lost port by riding along with
-	// the port it won; if it loses every port, it's dropped entirely.
+	// before deciding what to include. Losing a port to a strictly
+	// higher-priority source (e.g. a raw "process" entry that's really just
+	// the docker-proxy for a container already listed under "docker") means
+	// this entry is a duplicate view of that same higher-priority service,
+	// so if it loses every port that way it's dropped entirely. But losing
+	// a port only on the same-priority tie-break (two distinct containers
+	// racing for one host port) doesn't mean the loser stopped existing —
+	// it just can't claim that port, so it's still kept, minus that port.
 	for _, id := range order {
 		svc := byID[id]
 		if len(svc.Ports) == 0 {
 			continue
 		}
 		var kept []int
+		dominated := false
 		for _, port := range svc.Ports {
 			won := true
 			for _, other := range portMap[port] {
@@ -231,6 +338,7 @@ func Deduplicate(services []Service) []Service {
 				}
 				if priority[other.Source] > priority[svc.Source] {
 					won = false
+					dominated = true
 					break
 				}
 				if priority[other.Source] == priority[svc.Source] && orderIndex[other.ID] < orderIndex[svc.ID] {
@@ -242,7 +350,7 @@ func Deduplicate(services []Service) []Service {
 				kept = append(kept, port)
 			}
 		}
-		if len(kept) == 0 {
+		if len(kept) == 0 && dominated {
 			continue
 		}
 		svc.Ports = kept
@@ -380,7 +488,6 @@ func GitSearchRoots() []string {
 		filepath.Join(homeDir, "github"),
 		filepath.Join(homeDir, "gitlab"),
 		filepath.Join(homeDir, "Documents"),
-		filepath.Join(homeDir, ".hermes"),
 		filepath.Join(homeDir, ".openclaw"),
 	}
 	if volumes, err := os.ReadDir("/Volumes"); err == nil {

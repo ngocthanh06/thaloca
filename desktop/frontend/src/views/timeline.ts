@@ -9,6 +9,7 @@
 // Service Inspector), since those are Runtime/Source Control concerns.
 import type { TimelineEvent, ActivitySummary } from '../api'
 import { escapeHTML, formatDate, getSourceBadgeClass } from '../dom'
+import { t } from '../i18n'
 
 export interface TimelineRow {
   at: string
@@ -36,7 +37,7 @@ export function renderTimelineView(events: TimelineEvent[], activity: ActivitySu
     .slice(0, 50)
 
   if (rows.length === 0) {
-    container.innerHTML = '<div class="empty compact">No activity recorded yet this session.</div>'
+    container.innerHTML = `<div class="empty compact">${t('No activity recorded yet this session.')}</div>`
     return
   }
 

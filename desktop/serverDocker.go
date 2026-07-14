@@ -31,6 +31,24 @@ func runSSHCommand(conn ServerConnection, timeout time.Duration, remoteCommand s
 	return string(out), err
 }
 
+// runSSHCommandStdout is like runSSHCommand but keeps stdout and stderr
+// separate, for callers that need clean, uncontaminated stdout — e.g.
+// crontab line-editing, which indexes lines by position and would silently
+// miscount if ssh's own one-time "Warning: Permanently added ... to the
+// list of known hosts" (printed to stderr on a host's first-ever
+// connection) got merged in ahead of the real output. On failure, stderr is
+// still recovered from the returned *exec.ExitError for error reporting.
+func runSSHCommandStdout(conn ServerConnection, timeout time.Duration, remoteCommand string) (stdout string, stderr string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	args := append(sshBaseArgs(conn), remoteCommand)
+	out, err := exec.CommandContext(ctx, "ssh", args...).Output()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		stderr = string(exitErr.Stderr)
+	}
+	return string(out), stderr, err
+}
+
 // dockerPSFormat asks Docker for one line per container, fields separated
 // by a unit separator (\x1f) — a byte that can't appear in any of these
 // fields, unlike a hand-built JSON string, so a container name/status

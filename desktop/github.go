@@ -177,6 +177,61 @@ func (a *App) GitHubCLIInstalled() bool {
 	return err == nil
 }
 
+// GitHubCLIAccount is one account gh is currently logged into on
+// github.com.
+type GitHubCLIAccount struct {
+	Login  string `json:"login"`
+	Active bool   `json:"active"`
+}
+
+// GitHubCLIAccounts lists every github.com account currently logged into
+// the gh CLI (gh supports being logged into several at once, switching
+// which one is "active" via `gh auth switch`) — backs an in-app account
+// switcher so the user doesn't have to run that in a terminal themselves.
+func (a *App) GitHubCLIAccounts() ([]GitHubCLIAccount, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil, fmt.Errorf("gh CLI is not installed")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com", "--json", "hosts").Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh auth status: %w", err)
+	}
+	var raw struct {
+		Hosts map[string][]struct {
+			Login  string `json:"login"`
+			Active bool   `json:"active"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, err
+	}
+	accounts := []GitHubCLIAccount{}
+	for _, acc := range raw.Hosts["github.com"] {
+		accounts = append(accounts, GitHubCLIAccount{Login: acc.Login, Active: acc.Active})
+	}
+	return accounts, nil
+}
+
+// SwitchGitHubCLIAccount makes the given login gh's active account for
+// github.com — every subsequent GitHub API call Thaloca makes (via
+// resolveGithubToken -> ghCLIToken) uses whichever account is active, so
+// this takes effect immediately without restarting the app.
+func (a *App) SwitchGitHubCLIAccount(login string) error {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return fmt.Errorf("account is empty")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gh", "auth", "switch", "--hostname", "github.com", "--user", login).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh auth switch: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // InstallAndLoginGitHubCLI opens Terminal.app to install the GitHub CLI via
 // Homebrew (if missing) and run `gh auth login`. The frontend must confirm
 // with the user before calling this — it runs a real install command in a
@@ -391,10 +446,33 @@ func githubAPI(method, path, token, accept string, body []byte) ([]byte, error) 
 	if resp.StatusCode >= 400 {
 		var ghErr struct {
 			Message string `json:"message"`
+			Errors  []struct {
+				Resource string `json:"resource"`
+				Field    string `json:"field"`
+				Code     string `json:"code"`
+				Message  string `json:"message"`
+			} `json:"errors"`
 		}
 		_ = json.Unmarshal(data, &ghErr)
 		if ghErr.Message == "" {
 			ghErr.Message = resp.Status
+		}
+		// A 422 "Validation Failed" carries the actual reason (e.g. "A pull
+		// request already exists for foo:bar", "No commits between main and
+		// feature-x") in `errors[]`, not in the generic top-level `message` —
+		// without this the user only ever sees "Validation Failed" and has
+		// no way to tell what actually went wrong.
+		var details []string
+		for _, e := range ghErr.Errors {
+			switch {
+			case e.Message != "":
+				details = append(details, e.Message)
+			case e.Field != "":
+				details = append(details, fmt.Sprintf("%s %s: %s", e.Resource, e.Field, e.Code))
+			}
+		}
+		if len(details) > 0 {
+			return nil, fmt.Errorf("GitHub API: %s: %s", ghErr.Message, strings.Join(details, "; "))
 		}
 		return nil, fmt.Errorf("GitHub API: %s", ghErr.Message)
 	}
@@ -437,6 +515,7 @@ type PullRequestDetail struct {
 	BaseRef            string               `json:"base_ref"`
 	Labels             []string             `json:"labels,omitempty"`
 	RequestedReviewers []string             `json:"requested_reviewers,omitempty"`
+	Assignees          []string             `json:"assignees,omitempty"`
 }
 
 // ownerRepoFromRemoteURL extracts "owner/name" from a git remote URL. SSH
@@ -788,6 +867,9 @@ func (a *App) PullRequestDetail(repo string, number int) (PullRequestDetail, err
 		RequestedReviewers []struct {
 			Login string `json:"login"`
 		} `json:"requested_reviewers"`
+		Assignees []struct {
+			Login string `json:"login"`
+		} `json:"assignees"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return detail, err
@@ -807,6 +889,9 @@ func (a *App) PullRequestDetail(repo string, number int) (PullRequestDetail, err
 	}
 	for _, r := range raw.RequestedReviewers {
 		detail.RequestedReviewers = append(detail.RequestedReviewers, r.Login)
+	}
+	for _, u := range raw.Assignees {
+		detail.Assignees = append(detail.Assignees, u.Login)
 	}
 	if comments, err := githubAPI(http.MethodGet, fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=50", slug, number), token, "", nil); err == nil {
 		var rawComments []struct {
@@ -989,6 +1074,63 @@ func (a *App) RequestReviewers(repo string, number int, reviewers []string) erro
 	return err
 }
 
+// RemoveReviewers withdraws a pending review request from the given GitHub
+// logins — the counterpart to RequestReviewers, so the reviewer picker can
+// behave like a real checkbox list (check to request, uncheck to withdraw).
+func (a *App) RemoveReviewers(repo string, number int, reviewers []string) error {
+	slug := githubRepoSlug(repo)
+	if slug == "" {
+		return fmt.Errorf("no GitHub repository detected for %s", repo)
+	}
+	token := githubToken()
+	if token == "" {
+		return fmt.Errorf("not logged in to GitHub")
+	}
+	if len(reviewers) == 0 {
+		return fmt.Errorf("no reviewers given")
+	}
+	payload, _ := json.Marshal(map[string][]string{"reviewers": reviewers})
+	_, err := githubAPI(http.MethodDelete, fmt.Sprintf("/repos/%s/pulls/%d/requested_reviewers", slug, number), token, "", payload)
+	return err
+}
+
+// AddAssignees assigns the given GitHub logins to a pull request (pull
+// requests share the issues assignees endpoint on GitHub, same as labels).
+func (a *App) AddAssignees(repo string, number int, assignees []string) error {
+	slug := githubRepoSlug(repo)
+	if slug == "" {
+		return fmt.Errorf("no GitHub repository detected for %s", repo)
+	}
+	token := githubToken()
+	if token == "" {
+		return fmt.Errorf("not logged in to GitHub")
+	}
+	if len(assignees) == 0 {
+		return fmt.Errorf("no assignees given")
+	}
+	payload, _ := json.Marshal(map[string][]string{"assignees": assignees})
+	_, err := githubAPI(http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/assignees", slug, number), token, "", payload)
+	return err
+}
+
+// RemoveAssignees unassigns the given GitHub logins from a pull request.
+func (a *App) RemoveAssignees(repo string, number int, assignees []string) error {
+	slug := githubRepoSlug(repo)
+	if slug == "" {
+		return fmt.Errorf("no GitHub repository detected for %s", repo)
+	}
+	token := githubToken()
+	if token == "" {
+		return fmt.Errorf("not logged in to GitHub")
+	}
+	if len(assignees) == 0 {
+		return fmt.Errorf("no assignees given")
+	}
+	payload, _ := json.Marshal(map[string][]string{"assignees": assignees})
+	_, err := githubAPI(http.MethodDelete, fmt.Sprintf("/repos/%s/issues/%d/assignees", slug, number), token, "", payload)
+	return err
+}
+
 // SetPullRequestLabels replaces a pull request's full label set (pull
 // requests share the issues label endpoint on GitHub).
 func (a *App) SetPullRequestLabels(repo string, number int, labels []string) error {
@@ -1035,6 +1177,36 @@ func (a *App) ListRepositoryLabels(repo string) ([]string, error) {
 		labels = append(labels, l.Name)
 	}
 	return labels, nil
+}
+
+// ListRepositoryCollaborators returns everyone with push access to the
+// repository, used to populate the reviewer/assignee pickers — GitHub only
+// allows requesting review from or assigning a collaborator, not an
+// arbitrary username.
+func (a *App) ListRepositoryCollaborators(repo string) ([]string, error) {
+	slug := githubRepoSlug(repo)
+	if slug == "" {
+		return nil, fmt.Errorf("no GitHub repository detected for %s", repo)
+	}
+	token := githubToken()
+	if token == "" {
+		return nil, fmt.Errorf("not logged in to GitHub")
+	}
+	data, err := githubAPI(http.MethodGet, fmt.Sprintf("/repos/%s/collaborators?per_page=100", slug), token, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	logins := []string{}
+	for _, u := range raw {
+		logins = append(logins, u.Login)
+	}
+	return logins, nil
 }
 
 // CreatePullRequest opens a new pull request from head into base.

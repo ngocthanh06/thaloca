@@ -174,15 +174,20 @@ const clipboardPollInterval = 1 * time.Second
 // app — not just inside Thaloca's own window — shows up in the history.
 // This is intentionally broad: whatever is copied anywhere on the Mac,
 // including something sensitive from a password manager or terminal, gets
-// written to ~/.thaloca/clipboard-history.json. The user opted into this
-// explicitly, aware of that tradeoff — the alternative (only recording
-// copies made inside Thaloca's own webview) is a plain 'copy' DOM event
-// listener, which cannot see clipboard activity in other apps at all.
+// written to ~/.thaloca/clipboard-history.json. Because of that, it's
+// gated on GetClipboardHistoryEnabled/SetClipboardHistoryEnabled (Settings
+// > Privacy) — checked every tick rather than only at startup, so toggling
+// it off takes effect immediately. Defaults to on: the alternative (only
+// recording copies made inside Thaloca's own webview) is a plain 'copy' DOM
+// event listener, which cannot see clipboard activity in other apps at all.
 func (a *App) pollSystemClipboard() {
 	lastText, _ := readSystemClipboard() // seed with whatever's already on the clipboard so it isn't recorded as a "new" copy on startup
 	ticker := time.NewTicker(clipboardPollInterval)
 	defer ticker.Stop()
 	for range ticker.C {
+		if !a.GetClipboardHistoryEnabled() {
+			continue
+		}
 		text, err := readSystemClipboard()
 		if err != nil || text == "" || text == lastText {
 			continue
@@ -190,6 +195,19 @@ func (a *App) pollSystemClipboard() {
 		lastText = text
 		_, _ = a.RecordClipboardCopy(text, "System clipboard")
 	}
+}
+
+// GetClipboardHistoryEnabled reports whether pollSystemClipboard is allowed
+// to record system-wide clipboard activity.
+func (a *App) GetClipboardHistoryEnabled() bool {
+	return loadUserSettings().ClipboardHistoryEnabled
+}
+
+// SetClipboardHistoryEnabled turns system-wide clipboard capture on or off.
+func (a *App) SetClipboardHistoryEnabled(enabled bool) error {
+	settings := loadUserSettings()
+	settings.ClipboardHistoryEnabled = enabled
+	return saveUserSettings(settings)
 }
 
 func readSystemClipboard() (string, error) {

@@ -128,14 +128,30 @@ func (a *App) SwitchBranch(repo, name string) error {
 	return runGitCommand(repo, 10*time.Second, "switch", strings.TrimSpace(name))
 }
 
-// MergeBranch merges the named branch into the current branch. On failure the
-// merge is aborted so the repository is never left mid-merge.
+// hasUnmergedPaths reports whether the working tree currently has any
+// conflicted ("U") path — i.e. a merge/rebase is genuinely mid-resolution,
+// as opposed to having failed for some other reason (bad ref, dirty
+// worktree blocking the merge, etc).
+func hasUnmergedPaths(repo string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "diff", "--name-only", "--diff-filter=U").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+// MergeBranch merges the named branch into the current branch. A real
+// conflict is left in place (not aborted) so the Changes tab's existing
+// Conflicts panel (resolve ours/theirs, then Commit) can finish it — only a
+// non-conflict failure (invalid branch, dirty worktree blocking the merge)
+// aborts, since there's nothing there for the user to resolve.
 func (a *App) MergeBranch(repo, name string) error {
 	if err := validBranchName(name); err != nil {
 		return err
 	}
 	if err := runGitCommand(repo, 30*time.Second, "merge", "--no-edit", "--", strings.TrimSpace(name)); err != nil {
-		_ = runGitCommand(repo, 10*time.Second, "merge", "--abort")
+		if !hasUnmergedPaths(repo) {
+			_ = runGitCommand(repo, 10*time.Second, "merge", "--abort")
+		}
 		return err
 	}
 	return nil
