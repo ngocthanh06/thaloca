@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { installMockApp } from './mockApp'
 
-test('sidebar shows the 7-item nav and Runtime has all 4 subtabs', async ({ page }) => {
+test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', e => errors.push(e.message))
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
@@ -11,7 +11,7 @@ test('sidebar shows the 7-item nav and Runtime has all 4 subtabs', async ({ page
   await page.waitForSelector('.nav-btn')
 
   const navLabels = await page.locator('.nav-btn span').allTextContents()
-  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Activity', 'Resources', 'Tools', 'Servers'])
+  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Activity', 'Resources', 'Tools', 'Servers', 'Logs', 'Security'])
 
   await page.click('.nav-btn[data-view="runtime"]')
   const subtabLabels = await page.locator('#services-subtabs .subtab').allTextContents()
@@ -21,4 +21,32 @@ test('sidebar shows the 7-item nav and Runtime has all 4 subtabs', async ({ page
   await expect(page.locator('#subview-jobs')).toHaveClass(/active/)
 
   expect(errors).toEqual([])
+})
+
+test('container runtime status loads only on Runtime and refreshes once after Stop', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(() => {
+    ;(window as any).__containerRuntimeStatus = {
+      engines: [
+        { kind: 'docker-desktop', name: 'Docker Desktop', download_url: 'https://example.com/docker', installed: true, running: true },
+        { kind: 'orbstack', name: 'OrbStack', download_url: 'https://example.com/orbstack', installed: false, running: false },
+        { kind: 'colima', name: 'Colima', installed: false, running: false },
+      ],
+      multiple_running: false,
+      homebrew_available: false,
+    }
+  })
+  await page.goto('/')
+  await page.evaluate(() => {
+    document.getElementById('splash-screen')?.remove()
+  })
+
+  const statusCallCount = () => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'GetContainerRuntimeStatus').length)
+  expect(await statusCallCount()).toBe(0)
+  await page.click('.nav-btn[data-view="runtime"]')
+  await expect(page.locator('[data-engine-stop="docker-desktop"]')).toBeVisible()
+  expect(await statusCallCount()).toBe(1)
+  await page.locator('[data-engine-stop="docker-desktop"]').evaluate((button: HTMLButtonElement) => button.click())
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'StopContainerRuntime').length)).toBe(1)
+  await expect.poll(statusCallCount).toBe(2)
 })

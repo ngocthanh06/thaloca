@@ -497,6 +497,60 @@ export namespace main {
 	        this.detected_value = source["detected_value"];
 	    }
 	}
+	export class RuntimeEngineStatus {
+	    kind: string;
+	    name: string;
+	    download_url?: string;
+	    installed: boolean;
+	    running: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuntimeEngineStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.download_url = source["download_url"];
+	        this.installed = source["installed"];
+	        this.running = source["running"];
+	    }
+	}
+	export class ContainerRuntimeStatus {
+	    engines: RuntimeEngineStatus[];
+	    multiple_running: boolean;
+	    homebrew_available: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContainerRuntimeStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.engines = this.convertValues(source["engines"], RuntimeEngineStatus);
+	        this.multiple_running = source["multiple_running"];
+	        this.homebrew_available = source["homebrew_available"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DeviceCode {
 	    user_code: string;
 	    verification_uri: string;
@@ -712,6 +766,7 @@ export namespace main {
 	    running: boolean;
 	    cpu_percent: number;
 	    mem_percent: number;
+	    icon?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new InstalledApp(source);
@@ -726,6 +781,7 @@ export namespace main {
 	        this.running = source["running"];
 	        this.cpu_percent = source["cpu_percent"];
 	        this.mem_percent = source["mem_percent"];
+	        this.icon = source["icon"];
 	    }
 	}
 	export class Job {
@@ -1314,6 +1370,7 @@ export namespace main {
 	        this.in_reply_to = source["in_reply_to"];
 	    }
 	}
+	
 	export class SSHConfigHost {
 	    alias: string;
 	    host: string;
@@ -1485,6 +1542,7 @@ export namespace main {
 	    install_command?: string;
 	    update_command?: string;
 	    managed_by?: string;
+	    install_blocked_reason?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ToolInfo(source);
@@ -1500,6 +1558,7 @@ export namespace main {
 	        this.install_command = source["install_command"];
 	        this.update_command = source["update_command"];
 	        this.managed_by = source["managed_by"];
+	        this.install_blocked_reason = source["install_blocked_reason"];
 	    }
 	}
 	export class ToolsSnapshot {

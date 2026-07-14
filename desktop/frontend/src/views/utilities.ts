@@ -27,6 +27,9 @@ interface UtilityTool {
 let initialized = false
 let activeToolId = ''
 let searchQuery = ''
+const modalToolCategories = new Set(['Encoding', 'Data formats', 'Text tools', 'Dev tools', 'Auth', 'Network'])
+let markdownPreviewDraft = ''
+let markdownPreviewZoom = 110
 
 export function initUtilitiesView(): void {
   const root = document.getElementById('utilities-content')
@@ -80,6 +83,10 @@ function selectTool(id: string): void {
   if (!detail) return
   const tool = tools.find(t => t.id === id)
   if (!tool) return
+  const opensModal = modalToolCategories.has(tool.category)
+  detail.querySelector<HTMLElement>('.markdown-workspace, .utility-tool-modal')?.dispatchEvent(new Event('utility:dispose'))
+  detail.classList.toggle('utilities-detail--markdown', id === 'markdown-preview')
+  detail.classList.toggle('utilities-detail--modal-tool', opensModal && id !== 'markdown-preview')
   detail.innerHTML = ''
   const heading = document.createElement('h3')
   heading.className = 'utilities-detail-title'
@@ -88,7 +95,65 @@ function selectTool(id: string): void {
   const body = document.createElement('div')
   body.className = 'utilities-detail-body'
   detail.appendChild(body)
-  tool.mount(body)
+  if (opensModal && id !== 'markdown-preview') mountUtilityToolModal(body, tool)
+  else tool.mount(body)
+}
+
+function mountUtilityToolModal(container: HTMLElement, tool: UtilityTool): void {
+  const categoryIcons: Record<string, string> = {
+    Encoding: '&lt;/&gt;',
+    'Data formats': '{ }',
+    'Text tools': 'Aa',
+    'Dev tools': '$_',
+    Auth: 'ID',
+    Network: 'IP',
+  }
+  const backdrop = document.createElement('div')
+  backdrop.className = 'markdown-modal-backdrop utility-modal-backdrop'
+  const launcher = document.createElement('div')
+  launcher.className = 'utility-modal-launcher'
+  launcher.hidden = true
+  launcher.innerHTML = `<span class="markdown-file-icon utility-modal-icon">${categoryIcons[tool.category] || '$_'}</span><div><strong>${escapeHTML(tool.name)}</strong><span>${escapeHTML(tool.category)}</span></div><button class="btn-primary utility-modal-reopen" type="button">Open tool</button>`
+  const modal = document.createElement('section')
+  modal.className = 'utility-tool-modal'
+  modal.dataset.toolId = tool.id
+  modal.setAttribute('role', 'dialog')
+  modal.setAttribute('aria-modal', 'true')
+  modal.setAttribute('aria-label', tool.name)
+  modal.innerHTML = `
+    <header class="markdown-modal-header utility-modal-header">
+      <div class="markdown-modal-identity">
+        <span class="markdown-file-icon utility-modal-icon">${categoryIcons[tool.category] || '$_'}</span>
+        <div><strong>${escapeHTML(tool.name)}</strong><span>${escapeHTML(tool.category)}</span></div>
+      </div>
+      <button class="markdown-toolbar-btn markdown-close utility-modal-close" type="button" aria-label="Close ${escapeHTML(tool.name)}" title="Close (Esc)"></button>
+    </header>
+    <div class="utility-modal-content"></div>`
+  container.append(launcher, backdrop, modal)
+
+  const close = () => {
+    document.removeEventListener('keydown', handleEscape)
+    modal.hidden = true
+    backdrop.hidden = true
+    launcher.hidden = false
+  }
+  const open = () => {
+    modal.hidden = false
+    backdrop.hidden = false
+    launcher.hidden = true
+    document.addEventListener('keydown', handleEscape)
+  }
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && modal.isConnected) close()
+  }
+  modal.querySelector('.utility-modal-close')!.addEventListener('click', close)
+  backdrop.addEventListener('click', close)
+  modal.addEventListener('utility:dispose', close, { once: true })
+  launcher.querySelector('.utility-modal-reopen')!.addEventListener('click', open)
+  document.addEventListener('keydown', handleEscape)
+  const content = modal.querySelector<HTMLElement>('.utility-modal-content')!
+  tool.mount(content)
+  if (content.querySelectorAll(':scope > .utility-io-panel').length > 1) content.classList.add('multi-panel')
 }
 
 // ---- Shared IO panel builder ----------------------------------------
@@ -119,26 +184,34 @@ function buildIOPanel(container: HTMLElement, opts: IOPanelOptions): { input: HT
   const wrap = document.createElement('div')
   wrap.className = 'utility-io-panel'
   wrap.innerHTML = `
-    <label class="utility-field">
+    <label class="utility-field utility-input-field">
       <span>${opts.inputLabel}</span>
       <textarea class="utility-textarea" placeholder="${opts.placeholder || ''}"></textarea>
     </label>
-    <div class="security-toolbar"><button class="btn-primary utility-run-btn">${opts.actionLabel}</button></div>
-    <label class="utility-field">
-      <span>${opts.outputLabel}</span>
-      ${opts.renderOutput ? `
+    <div class="security-toolbar utility-run-toolbar"><button class="btn-primary utility-run-btn">${opts.actionLabel}</button></div>
+    ${opts.renderOutput ? `
+      <!-- A plain div, not <label> like the other fields: a <label> auto-forwards any click landing on
+           a non-interactive descendant (e.g. clicking inside the rendered preview text) to the first
+           labelable element inside it, which here is the Maximize button — instantly closing the preview
+           right after opening it. -->
+      <div class="utility-field utility-output-field">
+        <span>${opts.outputLabel}</span>
         <div class="utility-preview-container">
           <div class="security-toolbar"><button class="btn-secondary utility-maximize-btn" type="button">Maximize</button></div>
           <div class="utility-textarea utility-rendered-output"></div>
-        </div>` : '<textarea class="utility-textarea" readonly></textarea>'}
-    </label>
-    <div class="security-toolbar"><button class="btn-secondary utility-copy-btn">Copy result</button></div>
+        </div>
+      </div>` : `
+      <label class="utility-field utility-output-field">
+        <span>${opts.outputLabel}</span>
+        <pre class="utility-textarea utility-generated-output"></pre>
+      </label>`}
+    <div class="security-toolbar utility-copy-toolbar"><button class="btn-secondary utility-copy-btn">Copy result</button></div>
     <p class="resource-detail tool-action-failed utility-error" style="display:none"></p>`
   container.appendChild(wrap)
 
   const input = wrap.querySelector<HTMLTextAreaElement>('.utility-textarea')!
   const previewOutput = wrap.querySelector<HTMLElement>('.utility-rendered-output')
-  const textOutput = wrap.querySelector<HTMLTextAreaElement>('.utility-textarea[readonly]')
+  const generatedOutput = wrap.querySelector<HTMLElement>('.utility-generated-output')
   const errorEl = wrap.querySelector<HTMLElement>('.utility-error')!
   const runBtn = wrap.querySelector<HTMLButtonElement>('.utility-run-btn')!
 
@@ -148,8 +221,8 @@ function buildIOPanel(container: HTMLElement, opts: IOPanelOptions): { input: HT
     if (previewOutput) {
       previewOutput.innerHTML = opts.renderOutput!(value)
       if (opts.afterRender) opts.afterRender(previewOutput)
-    } else if (textOutput) {
-      textOutput.value = value
+    } else if (generatedOutput) {
+      generatedOutput.textContent = value
     }
   }
 
@@ -241,8 +314,8 @@ function buildTwoInputPanel(container: HTMLElement, opts: {
         <textarea class="utility-textarea utility-input-b"></textarea>
       </div>
     </div>
-    <label class="utility-field"><span>${opts.outputLabel}</span>${
-      opts.renderOutput ? '<pre class="utility-textarea utility-html-output"></pre>' : '<textarea class="utility-textarea" readonly></textarea>'
+    <label class="utility-field utility-compare-output"><span>${opts.outputLabel}</span>${
+      opts.renderOutput ? '<pre class="utility-textarea utility-html-output"></pre>' : '<pre class="utility-textarea utility-generated-output"></pre>'
     }</label>
     <div class="security-toolbar"><button class="btn-secondary utility-copy-btn">Copy result</button></div>
     <p class="resource-detail tool-action-failed utility-error" style="display:none"></p>`
@@ -251,13 +324,23 @@ function buildTwoInputPanel(container: HTMLElement, opts: {
   const inputA = wrap.querySelector<HTMLTextAreaElement>('.utility-input-a')!
   const inputB = wrap.querySelector<HTMLTextAreaElement>('.utility-input-b')!
   const htmlOutput = wrap.querySelector<HTMLElement>('.utility-html-output')
-  const textOutput = wrap.querySelector<HTMLTextAreaElement>('.utility-textarea[readonly]')
+  const generatedOutput = wrap.querySelector<HTMLElement>('.utility-generated-output')
   const errorEl = wrap.querySelector<HTMLElement>('.utility-error')!
+  let syncingScroll = false
+  const syncScroll = (source: HTMLTextAreaElement, target: HTMLTextAreaElement) => {
+    if (syncingScroll) return
+    syncingScroll = true
+    target.scrollTop = source.scrollTop
+    target.scrollLeft = source.scrollLeft
+    window.requestAnimationFrame(() => { syncingScroll = false })
+  }
+  inputA.addEventListener('scroll', () => syncScroll(inputA, inputB))
+  inputB.addEventListener('scroll', () => syncScroll(inputB, inputA))
   let resultText = ''
   const setOutput = (value: string) => {
     resultText = value
     if (htmlOutput) htmlOutput.innerHTML = opts.renderOutput!(value)
-    else if (textOutput) textOutput.value = value
+    else if (generatedOutput) generatedOutput.textContent = value
   }
   wrap.querySelector('.utility-run-btn')!.addEventListener('click', () => {
     try {
@@ -334,20 +417,20 @@ function buildBidirectionalPanel(container: HTMLElement, opts: {
 
 function buildGeneratorPanel(container: HTMLElement, label: string, generate: () => string): void {
   const wrap = document.createElement('div')
-  wrap.className = 'utility-io-panel'
+  wrap.className = 'utility-io-panel utility-generator-panel'
   wrap.innerHTML = `
-    <div class="security-toolbar"><button class="btn-primary utility-run-btn">Generate</button></div>
-    <label class="utility-field">
-      <span>${label}</span>
-      <textarea class="utility-textarea" readonly></textarea>
-    </label>
-    <div class="security-toolbar"><button class="btn-secondary utility-copy-btn">Copy result</button></div>`
+    <div class="utility-generator-card">
+      <div class="utility-generator-heading"><div><strong>${label}</strong><span>Generated locally</span></div><button class="btn-primary utility-run-btn">Generate new</button></div>
+      <pre class="utility-generator-value"></pre>
+      <div class="utility-generator-footer"><span>Click Generate new for another value</span><button class="btn-secondary utility-copy-btn">Copy</button></div>
+    </div>`
   container.appendChild(wrap)
-  const output = wrap.querySelector<HTMLTextAreaElement>('.utility-textarea')!
-  const fill = () => { output.value = generate() }
+  const output = wrap.querySelector<HTMLElement>('.utility-generator-value')!
+  let currentValue = ''
+  const fill = () => { currentValue = generate(); output.textContent = currentValue }
   wrap.querySelector('.utility-run-btn')!.addEventListener('click', fill)
   wrap.querySelector('.utility-copy-btn')!.addEventListener('click', () => {
-    void copyToClipboard(output.value, `Utilities: ${label}`)
+    void copyToClipboard(currentValue, `Utilities: ${label}`)
   })
   fill()
 }
@@ -488,6 +571,72 @@ function renderInlineMarkdown(text: string): string {
   return s
 }
 
+// Generic (not per-language) syntax highlighting for fenced code blocks in
+// Markdown Preview — matches comments/strings/numbers/keywords across
+// whatever mix of languages a snippet uses, rather than needing one grammar
+// per `lang`. Deliberately hand-rolled like the rest of this file's Markdown
+// parser instead of pulling in highlight.js/Prism for a handful of colors.
+const HIGHLIGHT_KEYWORDS = new Set([
+  'function', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue',
+  'const', 'let', 'var', 'class', 'extends', 'implements', 'interface', 'type', 'enum', 'struct',
+  'import', 'export', 'from', 'as', 'default', 'new', 'delete', 'typeof', 'instanceof', 'in', 'of',
+  'try', 'catch', 'finally', 'throw', 'async', 'await', 'yield', 'static', 'public', 'private',
+  'protected', 'readonly', 'abstract', 'void', 'null', 'undefined', 'true', 'false', 'this', 'self',
+  'super', 'def', 'lambda', 'pass', 'elif', 'not', 'and', 'or', 'None', 'True', 'False', 'with',
+  'func', 'package', 'go', 'defer', 'chan', 'select', 'range', 'nil', 'fn', 'impl', 'match', 'mod',
+  'use', 'pub', 'trait', 'insert', 'update', 'where', 'join', 'group',
+  'order', 'by', 'into', 'values', 'set', 'table', 'begin', 'end', 'then',
+])
+const HIGHLIGHT_TOKEN_RE = /\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+\.?\d*\b|\b[A-Za-z_][\w]*\b/g
+
+function highlightCode(code: string): string {
+  let out = ''
+  let last = 0
+  for (const match of code.matchAll(HIGHLIGHT_TOKEN_RE)) {
+    const token = match[0]
+    const start = match.index!
+    out += escapeHTML(code.slice(last, start))
+    last = start + token.length
+
+    let cls: string | null = null
+    if (token.startsWith('//') || token.startsWith('#') || token.startsWith('/*')) cls = 'tok-comment'
+    else if (/^['"`]/.test(token)) cls = 'tok-string'
+    else if (/^\d/.test(token)) cls = 'tok-number'
+    else if (HIGHLIGHT_KEYWORDS.has(token)) cls = 'tok-keyword'
+
+    out += cls ? `<span class="${cls}">${escapeHTML(token)}</span>` : escapeHTML(token)
+  }
+  out += escapeHTML(code.slice(last))
+  return out
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let current = ''
+  let escaped = false
+  for (const char of trimmed) {
+    if (escaped) { current += char; escaped = false }
+    else if (char === '\\') escaped = true
+    else if (char === '|') { cells.push(current.trim()); current = '' }
+    else current += char
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+function isMarkdownTableDivider(line: string): boolean {
+  const cells = parseMarkdownTableRow(line)
+  return cells.length > 0 && cells.every(cell => /^:?-{3,}:?$/.test(cell))
+}
+
+function renderMarkdownListItem(item: string): string {
+  const task = item.match(/^\[([ xX])\]\s+(.*)$/)
+  if (!task) return `<li>${renderInlineMarkdown(item)}</li>`
+  const checked = task[1].toLowerCase() === 'x'
+  return `<li class="task-list-item"><label><input type="checkbox" disabled${checked ? ' checked' : ''}><span>${renderInlineMarkdown(task[2])}</span></label></li>`
+}
+
 function markdownToHTML(md: string): string {
   const lines = md.replace(/\r\n?/g, '\n').split('\n')
   const html: string[] = []
@@ -503,8 +652,9 @@ function markdownToHTML(md: string): string {
   }
   const flushList = () => {
     if (listItems.length && listType) {
-      const items = listItems.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join('')
-      html.push(`<${listType}>${items}</${listType}>`)
+      const hasTasks = listItems.some(item => /^\[[ xX]\]\s+/.test(item))
+      const items = listItems.map(renderMarkdownListItem).join('')
+      html.push(`<${listType}${hasTasks ? ' class="task-list"' : ''}>${items}</${listType}>`)
     }
     listItems = []
     listType = null
@@ -531,10 +681,11 @@ function markdownToHTML(md: string): string {
         // mermaid.run() against every ".mermaid" element. escapeHTML here
         // is just to inject the source safely as HTML; mermaid reads it
         // back out via .textContent, which un-escapes it again.
-        html.push(`<div class="mermaid">${escapeHTML(codeLines.join('\n'))}</div>`)
+        html.push(`<section class="markdown-mermaid-card"><div class="markdown-mermaid-header"><div><span>Diagram</span><span class="markdown-mermaid-badge">Mermaid</span></div></div><div class="mermaid">${escapeHTML(codeLines.join('\n'))}</div></section>`)
       } else {
         const cls = lang ? ` class="language-${escapeHTML(lang)}"` : ''
-        html.push(`<pre><code${cls}>${escapeHTML(codeLines.join('\n'))}</code></pre>`)
+        const language = lang || 'plain text'
+        html.push(`<div class="markdown-code-block"><div class="markdown-code-header"><span>${escapeHTML(language)}</span><button class="markdown-code-copy" type="button" aria-label="Copy code">Copy</button></div><pre><code${cls}>${highlightCode(codeLines.join('\n'))}</code></pre></div>`)
       }
       continue
     }
@@ -551,6 +702,20 @@ function markdownToHTML(md: string): string {
       const level = heading[1].length
       html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`)
       i++
+      continue
+    }
+
+    if (line.includes('|') && i + 1 < lines.length && isMarkdownTableDivider(lines[i + 1])) {
+      flushParagraph(); flushList()
+      const headers = parseMarkdownTableRow(line)
+      const alignments = parseMarkdownTableRow(lines[i + 1]).map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center' : cell.endsWith(':') ? 'right' : 'left')
+      const rows: string[][] = []
+      i += 2
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push(parseMarkdownTableRow(lines[i]))
+        i++
+      }
+      html.push(`<div class="markdown-table-wrap"><table><thead><tr>${headers.map((cell, index) => `<th style="text-align:${alignments[index] || 'left'}">${renderInlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${headers.map((_, index) => `<td style="text-align:${alignments[index] || 'left'}">${renderInlineMarkdown(row[index] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)
       continue
     }
 
@@ -607,11 +772,283 @@ function markdownToHTML(md: string): string {
 // e.g. by editing the input again, is enough to pick up a new session's
 // theme choice without adding a live theme-change listener for this one
 // case).
-let mermaidInitialized = false
-function ensureMermaidInitialized(): void {
-  if (mermaidInitialized) return
-  mermaidInitialized = true
-  mermaid.initialize({ startOnLoad: false, theme: getTheme() === 'light' ? 'default' : 'dark' })
+let mermaidTheme = ''
+function ensureMermaidInitialized(mode: 'light' | 'dark' = getTheme()): void {
+  const nextTheme = mode === 'light' ? 'default' : 'dark'
+  if (mermaidTheme === nextTheme) return
+  mermaidTheme = nextTheme
+  mermaid.initialize({ startOnLoad: false, theme: nextTheme, securityLevel: 'strict' })
+}
+
+function mountMarkdownPreview(container: HTMLElement): void {
+  const placeholder = `# Project documentation
+
+Start writing Markdown here...
+
+## Quick start
+
+- [x] Live preview
+- [ ] Add your content
+
+\`\`\`typescript
+const message = "Hello, developer!"
+console.log(message)
+\`\`\``
+
+  const backdrop = document.createElement('div')
+  backdrop.className = 'markdown-modal-backdrop'
+  container.appendChild(backdrop)
+
+  const workspace = document.createElement('div')
+  workspace.className = 'markdown-workspace modal'
+  workspace.dataset.previewMode = getTheme()
+  workspace.dataset.previewStyle = 'github'
+  workspace.innerHTML = `
+    <header class="markdown-modal-header">
+      <div class="markdown-modal-identity">
+        <span class="markdown-file-icon">MD</span>
+        <div><strong>Markdown Preview</strong><span><i></i>Live rendering</span></div>
+      </div>
+      <div class="markdown-modal-actions">
+        <div class="markdown-toolbar-group">
+          <label class="markdown-theme-control"><span>Document</span><select class="markdown-theme-select" aria-label="Document theme"><option value="github">GitHub</option><option value="notion">Notion</option><option value="obsidian">Obsidian</option></select></label>
+          <span class="markdown-toolbar-divider"></span>
+          <div class="markdown-mode-toggle" role="group" aria-label="Color mode"><button type="button" data-mode="light">Light</button><button type="button" data-mode="dark">Dark</button></div>
+          <div class="markdown-zoom-control" role="group" aria-label="Preview zoom"><button type="button" data-zoom="out" aria-label="Zoom out">−</button><button class="markdown-zoom-value" type="button" data-zoom="reset" title="Reset zoom">${markdownPreviewZoom}%</button><button type="button" data-zoom="in" aria-label="Zoom in">+</button></div>
+        </div>
+        <span class="markdown-toolbar-divider"></span>
+        <div class="markdown-toolbar-actions">
+          <button class="markdown-toolbar-btn markdown-copy-html" type="button"><span class="markdown-copy-icon"></span>Copy HTML</button>
+          <button class="markdown-toolbar-btn markdown-copy-source" type="button"><span class="markdown-copy-icon"></span>Copy Markdown</button>
+          <button class="markdown-toolbar-btn markdown-close" type="button" aria-label="Close Markdown Preview" title="Close (Esc)"></button>
+        </div>
+      </div>
+    </header>
+    <div class="markdown-workspace-body">
+      <section class="markdown-editor-pane" aria-label="Markdown editor">
+        <header class="markdown-pane-header"><strong>Editor</strong><span class="markdown-file-type">MARKDOWN · .md</span></header>
+        <div class="markdown-editor-shell">
+          <pre class="markdown-line-numbers" aria-hidden="true">1</pre>
+          <textarea class="markdown-source" aria-label="Markdown source" spellcheck="false"></textarea>
+        </div>
+      </section>
+      <div class="markdown-splitter" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview" tabindex="0"><span></span></div>
+      <section class="markdown-preview-pane" aria-label="Rendered preview">
+        <header class="markdown-pane-header markdown-preview-heading"><strong>Preview</strong><span class="markdown-preview-badge">Rendered</span></header>
+        <div class="markdown-preview-canvas">
+          <article class="markdown-document utility-rendered-output"><div class="markdown-document-content"><div class="markdown-empty-state"><span>MD</span><strong>Your document preview</strong><p>Start typing in the editor to render Markdown here.</p></div></div></article>
+        </div>
+        <footer class="markdown-statusbar">
+          <span class="markdown-status-item status-words"><strong data-stat="words">0</strong> words</span><span class="markdown-status-item status-characters"><strong data-stat="characters">0</strong> characters</span><span class="markdown-status-item status-reading"><strong data-stat="reading">0 min</strong> read</span><span class="markdown-status-item status-render"><strong data-stat="render">0 ms</strong> render</span>
+          <span class="markdown-status-spacer"></span><span class="markdown-status-ok status-mermaid" data-stat="mermaid">● Mermaid ready</span><span class="markdown-status-ok status-syntax" data-stat="syntax">● Syntax ready</span>
+        </footer>
+      </section>
+    </div>`
+  container.appendChild(workspace)
+
+  const source = workspace.querySelector<HTMLTextAreaElement>('.markdown-source')!
+  const lineNumbers = workspace.querySelector<HTMLElement>('.markdown-line-numbers')!
+  const documentEl = workspace.querySelector<HTMLElement>('.markdown-document')!
+  const documentContent = workspace.querySelector<HTMLElement>('.markdown-document-content')!
+  const canvas = workspace.querySelector<HTMLElement>('.markdown-preview-canvas')!
+  const editorPane = workspace.querySelector<HTMLElement>('.markdown-editor-pane')!
+  const splitter = workspace.querySelector<HTMLElement>('.markdown-splitter')!
+  const modeButtons = workspace.querySelectorAll<HTMLButtonElement>('[data-mode]')
+  const zoomLabel = workspace.querySelector<HTMLElement>('.markdown-zoom-value')!
+  let latestHTML = ''
+  let zoom = markdownPreviewZoom
+  let renderSequence = 0
+
+  source.placeholder = placeholder
+  source.value = markdownPreviewDraft
+
+  const setStat = (name: string, value: string) => {
+    const el = workspace.querySelector<HTMLElement>(`[data-stat="${name}"]`)
+    if (el) el.textContent = value
+  }
+  const syncModeButtons = () => modeButtons.forEach(button => button.classList.toggle('active', button.dataset.mode === workspace.dataset.previewMode))
+  syncModeButtons()
+
+  const setZoom = (nextZoom: number) => {
+    zoom = Math.min(200, Math.max(70, nextZoom))
+    markdownPreviewZoom = zoom
+    zoomLabel.textContent = `${zoom}%`
+    documentContent.style.setProperty('zoom', String(zoom / 100))
+    documentContent.style.width = `${10000 / zoom}%`
+  }
+  setZoom(zoom)
+
+  const updateLineNumbers = () => {
+    const count = Math.max(1, source.value.split('\n').length)
+    lineNumbers.textContent = Array.from({ length: count }, (_, index) => String(index + 1)).join('\n')
+  }
+
+  const setupMermaidControls = () => {
+    documentContent.querySelectorAll<HTMLElement>('.markdown-mermaid-card').forEach(card => {
+      const viewport = card.querySelector<HTMLElement>('.mermaid')
+      const svg = viewport?.querySelector<SVGSVGElement>('svg')
+      if (!svg || !viewport) return
+      viewport.title = 'Pinch with two fingers to zoom this diagram'
+      const naturalWidth = svg.viewBox.baseVal.width || svg.getBoundingClientRect().width
+      let diagramZoom = 100
+      let gestureStartZoom = 100
+      let indicatorTimer: number | undefined
+      const indicator = document.createElement('span')
+      indicator.className = 'markdown-mermaid-zoom-indicator'
+      indicator.textContent = '100%'
+      viewport.appendChild(indicator)
+
+      const showIndicator = () => {
+        indicator.textContent = `${Math.round(diagramZoom)}%`
+        indicator.classList.add('visible')
+        window.clearTimeout(indicatorTimer)
+        indicatorTimer = window.setTimeout(() => indicator.classList.remove('visible'), 700)
+      }
+      const applyDiagramZoom = (nextZoom: number) => {
+        diagramZoom = Math.min(300, Math.max(50, nextZoom))
+        svg.style.width = `${naturalWidth * diagramZoom / 100}px`
+        svg.style.maxWidth = 'none'
+        svg.style.height = 'auto'
+        svg.style.margin = '0 auto'
+        showIndicator()
+      }
+
+      viewport.addEventListener('wheel', event => {
+        // Chromium-style trackpad pinch is exposed as Ctrl+wheel. Ordinary
+        // two-finger scrolling remains untouched for navigating the card.
+        if (!event.ctrlKey) return
+        event.preventDefault()
+        applyDiagramZoom(diagramZoom * Math.exp(-event.deltaY * 0.01))
+      }, { passive: false })
+
+      // WKWebView/Safari exposes native macOS pinch through gesture events.
+      viewport.addEventListener('gesturestart', event => {
+        if (event.cancelable) event.preventDefault()
+        gestureStartZoom = diagramZoom
+      })
+      viewport.addEventListener('gesturechange', event => {
+        if (event.cancelable) event.preventDefault()
+        const scale = Number((event as Event & { scale?: number }).scale) || 1
+        applyDiagramZoom(gestureStartZoom * scale)
+      })
+
+      // Natural Mermaid rendering is the default; the indicator only appears
+      // after the user actively pinches the diagram.
+      svg.style.width = `${naturalWidth}px`
+      svg.style.maxWidth = '100%'
+      svg.style.height = 'auto'
+    })
+  }
+
+  const render = async () => {
+    const sequence = ++renderSequence
+    const started = performance.now()
+    const markdown = source.value
+    latestHTML = markdownToHTML(markdown)
+    documentContent.innerHTML = markdown.trim() ? latestHTML : '<div class="markdown-empty-state"><span>MD</span><strong>Your document preview</strong><p>Start typing in the editor to render Markdown here.</p></div>'
+
+    const words = markdown.trim() ? markdown.trim().split(/\s+/).length : 0
+    setStat('words', String(words))
+    setStat('characters', String(markdown.length))
+    setStat('reading', words ? `${Math.max(1, Math.ceil(words / 220))} min` : '0 min')
+    setStat('syntax', documentEl.querySelector('pre code') ? '● Syntax active' : '● Syntax ready')
+
+    documentEl.querySelectorAll<HTMLButtonElement>('.markdown-code-copy').forEach(button => {
+      button.addEventListener('click', () => {
+        const code = button.closest('.markdown-code-block')?.querySelector('code')?.textContent || ''
+        void copyToClipboard(code, 'Markdown Preview: code block')
+        button.textContent = 'Copied'
+        window.setTimeout(() => { button.textContent = 'Copy' }, 1200)
+      })
+    })
+
+    const diagrams = documentEl.querySelectorAll<HTMLElement>('.mermaid')
+    if (diagrams.length) {
+      setStat('mermaid', '● Rendering Mermaid')
+      try {
+        ensureMermaidInitialized(workspace.dataset.previewMode as 'light' | 'dark')
+        await mermaid.run({ nodes: Array.from(diagrams) })
+        if (sequence === renderSequence) {
+          setupMermaidControls()
+          setStat('mermaid', `● Mermaid ${diagrams.length} ready`)
+        }
+      } catch {
+        if (sequence === renderSequence) setStat('mermaid', '● Mermaid error')
+      }
+    } else setStat('mermaid', '● Mermaid ready')
+    if (sequence === renderSequence) setStat('render', `${Math.max(1, Math.round(performance.now() - started))} ms`)
+  }
+
+  source.addEventListener('input', () => {
+    markdownPreviewDraft = source.value
+    updateLineNumbers()
+    void render()
+  })
+  source.addEventListener('scroll', () => { lineNumbers.scrollTop = source.scrollTop })
+
+  workspace.querySelector<HTMLSelectElement>('.markdown-theme-select')!.addEventListener('change', event => {
+    workspace.dataset.previewStyle = (event.target as HTMLSelectElement).value
+  })
+  modeButtons.forEach(button => button.addEventListener('click', () => {
+    workspace.dataset.previewMode = button.dataset.mode
+    syncModeButtons()
+    void render()
+  }))
+  workspace.querySelectorAll<HTMLButtonElement>('[data-zoom]').forEach(button => button.addEventListener('click', () => {
+    setZoom(button.dataset.zoom === 'reset' ? 100 : zoom + (button.dataset.zoom === 'in' ? 10 : -10))
+  }))
+  workspace.querySelector('.markdown-copy-html')!.addEventListener('click', () => void copyToClipboard(latestHTML, 'Markdown Preview: HTML'))
+  workspace.querySelector('.markdown-copy-source')!.addEventListener('click', () => void copyToClipboard(source.value, 'Markdown Preview: Markdown'))
+
+  const closeModal = () => {
+    markdownPreviewDraft = source.value
+    document.removeEventListener('keydown', handleEscape)
+    workspace.remove()
+    backdrop.remove()
+  }
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && workspace.isConnected) {
+      closeModal()
+      return
+    }
+    if (!(event.metaKey || event.ctrlKey) || !workspace.isConnected) return
+    const target = event.target
+    if (target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)) return
+    if (event.key === '+' || event.key === '=') { event.preventDefault(); setZoom(zoom + 10) }
+    else if (event.key === '-') { event.preventDefault(); setZoom(zoom - 10) }
+    else if (event.key === '0') { event.preventDefault(); setZoom(100) }
+  }
+  workspace.querySelector('.markdown-close')!.addEventListener('click', closeModal)
+  backdrop.addEventListener('click', closeModal)
+  workspace.addEventListener('utility:dispose', closeModal, { once: true })
+  document.addEventListener('keydown', handleEscape)
+
+  splitter.addEventListener('pointerdown', event => {
+    event.preventDefault()
+    splitter.setPointerCapture(event.pointerId)
+    workspace.classList.add('resizing')
+    const resize = (moveEvent: PointerEvent) => {
+      const rect = workspace.getBoundingClientRect()
+      const width = Math.min(rect.width * 0.7, Math.max(rect.width * 0.25, moveEvent.clientX - rect.left))
+      editorPane.style.flex = `0 0 ${width}px`
+    }
+    const finish = () => {
+      workspace.classList.remove('resizing')
+      splitter.removeEventListener('pointermove', resize)
+      splitter.removeEventListener('pointerup', finish)
+    }
+    splitter.addEventListener('pointermove', resize)
+    splitter.addEventListener('pointerup', finish)
+  })
+  splitter.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    const rect = editorPane.getBoundingClientRect()
+    editorPane.style.flex = `0 0 ${Math.max(280, rect.width + (event.key === 'ArrowRight' ? 24 : -24))}px`
+  })
+
+  updateLineNumbers()
+  void render()
+  canvas.scrollTop = 0
 }
 
 // ---- XML formatting (simple, regex-based indenter) ---------------------
@@ -874,10 +1311,43 @@ function diffText(a: string, b: string): string {
 // app's own commit/PR diff viewer does, so an unrelated wall of monospace
 // text isn't the only way to tell what changed.
 function renderDiffHTML(diffOutput: string): string {
-  return diffOutput.split('\n').map(line => {
-    const cls = line.startsWith('+') ? ' diff-add' : line.startsWith('-') ? ' diff-del' : ''
-    return `<span class="diff-line${cls}">${escapeHTML(line) || '&nbsp;'}</span>`
+  if (diffOutput === 'Identical.') {
+    return '<div class="utility-diff-empty"><span>✓</span><strong>No differences</strong><small>Original and modified content are identical.</small></div>'
+  }
+  const lines = diffOutput.split('\n')
+  const added = lines.filter(line => line.startsWith('+')).length
+  const removed = lines.filter(line => line.startsWith('-')).length
+  const unchanged = lines.length - added - removed
+  let oldLine = 0
+  let newLine = 0
+  const rows = lines.map(line => {
+    const isAdded = line.startsWith('+')
+    const isRemoved = line.startsWith('-')
+    if (!isAdded) oldLine++
+    if (!isRemoved) newLine++
+    const cls = isAdded ? 'diff-add' : isRemoved ? 'diff-del' : 'diff-context'
+    const marker = isAdded ? '+' : isRemoved ? '−' : ''
+    const content = line.length >= 2 ? line.slice(2) : ''
+    return `<span class="diff-line ${cls}"><span class="diff-marker">${marker}</span><span class="diff-old-line">${isAdded ? '' : oldLine}</span><span class="diff-new-line">${isRemoved ? '' : newLine}</span><code>${escapeHTML(content) || '&nbsp;'}</code></span>`
   }).join('')
+  return `<div class="utility-diff-summary"><div><strong>Changes</strong><span>Original A → Modified B</span></div><div class="utility-diff-stats"><span class="removed">−${removed} removed</span><span class="added">+${added} added</span><span>${unchanged} unchanged</span></div></div><div class="utility-diff-legend"><span class="removed"><i></i>Only in Original (A)</span><span class="added"><i></i>Only in Modified (B)</span></div><div class="utility-diff-rows">${rows}</div>`
+}
+
+function renderKeyedDiffHTML(diffOutput: string, sourceName: string): string {
+  if (diffOutput.startsWith('No differences')) {
+    return `<div class="utility-diff-empty"><span>✓</span><strong>No differences</strong><small>${escapeHTML(sourceName)} A and B contain the same effective values.</small></div>`
+  }
+  const lines = diffOutput.split('\n').filter(Boolean)
+  const added = lines.filter(line => line.startsWith('+')).length
+  const removed = lines.filter(line => line.startsWith('-')).length
+  const changed = lines.filter(line => line.startsWith('~')).length
+  const rows = lines.map(line => {
+    const type = line[0] === '+' ? 'add' : line[0] === '-' ? 'del' : 'change'
+    const marker = type === 'add' ? '+' : type === 'del' ? '−' : '↔'
+    const label = type === 'add' ? 'Added' : type === 'del' ? 'Removed' : 'Changed'
+    return `<span class="diff-line diff-${type}"><span class="diff-marker">${marker}</span><span class="diff-kind">${label}</span><code>${escapeHTML(line.slice(2)) || '&nbsp;'}</code></span>`
+  }).join('')
+  return `<div class="utility-diff-summary"><div><strong>Changes</strong><span>${escapeHTML(sourceName)} A → ${escapeHTML(sourceName)} B</span></div><div class="utility-diff-stats"><span class="removed">−${removed} removed</span><span class="changed">${changed} changed</span><span class="added">+${added} added</span></div></div><div class="utility-diff-legend"><span class="removed"><i></i>Only in A</span><span class="changed"><i></i>Value changed</span><span class="added"><i></i>Only in B</span></div><div class="utility-diff-rows utility-keyed-diff">${rows}</div>`
 }
 
 // ---- Case converter ------------------------------------------------------
@@ -892,26 +1362,115 @@ function splitWords(s: string): string[] {
     .map(w => w.toLowerCase())
 }
 
-function toCaseVariants(s: string): string {
-  const words = splitWords(s)
-  if (!words.length) return ''
-  const cap = (w: string) => w[0].toUpperCase() + w.slice(1)
-  const camel = words[0] + words.slice(1).map(cap).join('')
-  const pascal = words.map(cap).join('')
-  const snake = words.join('_')
-  const kebab = words.join('-')
-  const constant = words.join('_').toUpperCase()
-  const title = words.map(cap).join(' ')
-  const sentence = cap(words.join(' '))
-  return [
-    `camelCase:     ${camel}`,
-    `PascalCase:    ${pascal}`,
-    `snake_case:    ${snake}`,
-    `kebab-case:    ${kebab}`,
-    `CONSTANT_CASE: ${constant}`,
-    `Title Case:    ${title}`,
-    `Sentence case: ${sentence}`,
-  ].join('\n')
+interface CaseVariant {
+  id: string
+  label: string
+  value: string
+}
+
+function caseWordFormatter(id: string): (words: string[]) => string {
+  const cap = (word: string) => word ? word[0].toUpperCase() + word.slice(1) : word
+  return words => {
+    if (!words.length) return ''
+    if (id === 'camel') return words[0] + words.slice(1).map(cap).join('')
+    if (id === 'pascal') return words.map(cap).join('')
+    if (id === 'snake') return words.join('_')
+    if (id === 'kebab') return words.join('-')
+    if (id === 'constant') return words.join('_').toUpperCase()
+    if (id === 'title') return words.map(cap).join(' ')
+    return cap(words.join(' '))
+  }
+}
+
+function transformObjectKeys(value: unknown, format: (words: string[]) => string): unknown {
+  if (Array.isArray(value)) return value.map(item => transformObjectKeys(item, format))
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+    format(splitWords(key)),
+    transformObjectKeys(child, format),
+  ]))
+}
+
+function createCaseVariants(input: string): { variants: CaseVariant[]; isJSON: boolean } {
+  const definitions = [
+    ['camel', 'camelCase'], ['pascal', 'PascalCase'], ['snake', 'snake_case'],
+    ['kebab', 'kebab-case'], ['constant', 'CONSTANT_CASE'], ['title', 'Title Case'],
+    ['sentence', 'Sentence case'],
+  ]
+  let parsed: unknown
+  let isJSON = false
+  try {
+    parsed = JSON.parse(input)
+    isJSON = typeof parsed === 'object' && parsed !== null
+  } catch { /* Plain text is expected here. */ }
+
+  return {
+    isJSON,
+    variants: definitions.map(([id, label]) => {
+      const format = caseWordFormatter(id)
+      const value = isJSON
+        ? JSON.stringify(transformObjectKeys(parsed, format), null, 2)
+        : format(splitWords(input))
+      return { id, label, value }
+    }),
+  }
+}
+
+function mountCaseConverter(container: HTMLElement): void {
+  const wrap = document.createElement('div')
+  wrap.className = 'utility-io-panel case-converter-panel'
+  wrap.innerHTML = `
+    <section class="case-source-pane">
+      <header><div><strong>Source</strong><span>Text or JSON</span></div><span class="case-live-badge">Live</span></header>
+      <textarea class="utility-textarea case-source-input" placeholder="Paste text, an identifier, or a JSON object…" spellcheck="false"></textarea>
+    </section>
+    <section class="case-result-pane">
+      <header><div><strong>Converted output</strong><span class="case-input-kind">Plain text</span></div><button class="btn-secondary case-copy-current" type="button">Copy result</button></header>
+      <div class="case-result-body">
+        <nav class="case-variant-tabs" aria-label="Case variants"></nav>
+        <pre class="case-variant-output"><span class="case-empty-output">Start typing to generate case variants.</span></pre>
+      </div>
+    </section>`
+  container.appendChild(wrap)
+
+  const input = wrap.querySelector<HTMLTextAreaElement>('.case-source-input')!
+  const tabs = wrap.querySelector<HTMLElement>('.case-variant-tabs')!
+  const output = wrap.querySelector<HTMLElement>('.case-variant-output')!
+  const kind = wrap.querySelector<HTMLElement>('.case-input-kind')!
+  let variants: CaseVariant[] = []
+  let activeId = 'camel'
+  let inputIsJSON = false
+
+  const showVariant = (id: string) => {
+    activeId = id
+    const active = variants.find(variant => variant.id === activeId)
+    tabs.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.classList.toggle('active', button.dataset.caseVariant === activeId))
+    if (!active) output.innerHTML = '<span class="case-empty-output">Start typing to generate case variants.</span>'
+    else if (inputIsJSON) output.innerHTML = highlightCode(active.value)
+    else output.textContent = active.value
+  }
+  const render = () => {
+    if (!input.value.trim()) {
+      variants = []
+      inputIsJSON = false
+      tabs.innerHTML = ''
+      kind.textContent = 'Plain text'
+      showVariant(activeId)
+      return
+    }
+    const result = createCaseVariants(input.value)
+    variants = result.variants
+    inputIsJSON = result.isJSON
+    kind.textContent = result.isJSON ? 'JSON keys · values preserved' : 'Plain text'
+    tabs.innerHTML = variants.map(variant => `<button type="button" data-case-variant="${variant.id}" class="${variant.id === activeId ? 'active' : ''}">${variant.label}</button>`).join('')
+    tabs.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.addEventListener('click', () => showVariant(button.dataset.caseVariant!)))
+    showVariant(activeId)
+  }
+  input.addEventListener('input', render)
+  wrap.querySelector('.case-copy-current')!.addEventListener('click', () => {
+    const active = variants.find(variant => variant.id === activeId)
+    if (active) void copyToClipboard(active.value, `Utilities: Case Converter (${active.label})`)
+  })
 }
 
 // ---- JSON compare ------------------------------------------------------
@@ -1357,7 +1916,10 @@ const tools: UtilityTool[] = [
     buildIOPanel(c, { inputLabel: 'JSON', outputLabel: 'Formatted', actionLabel: 'Format', transform: s => JSON.stringify(JSON.parse(s), null, 2) })
   } },
   { id: 'json-compare', name: 'JSON Compare', category: 'Data formats', mount: c => {
-    buildTwoInputPanel(c, { labelA: 'JSON A', labelB: 'JSON B', outputLabel: 'Differences', actionLabel: 'Compare', transform: diffJSON })
+    buildTwoInputPanel(c, {
+      labelA: 'Original JSON (A)', labelB: 'Modified JSON (B)', outputLabel: 'JSON changes · A → B',
+      actionLabel: 'Compare', transform: diffJSON, renderOutput: result => renderKeyedDiffHTML(result, 'JSON'),
+    })
   } },
   { id: 'xml-format', name: 'XML Format', category: 'Data formats', mount: c => {
     buildIOPanel(c, { inputLabel: 'XML', outputLabel: 'Formatted', actionLabel: 'Format', transform: formatXML })
@@ -1378,23 +1940,10 @@ const tools: UtilityTool[] = [
   } },
 
   { id: 'text-diff', name: 'Text Diff', category: 'Text tools', mount: c => {
-    buildTwoInputPanel(c, { labelA: 'Text A', labelB: 'Text B', outputLabel: 'Diff (- removed / + added)', actionLabel: 'Compare', transform: diffText, renderOutput: renderDiffHTML })
+    buildTwoInputPanel(c, { labelA: 'Original (A)', labelB: 'Modified (B)', outputLabel: 'Unified diff · A → B', actionLabel: 'Compare', transform: diffText, renderOutput: renderDiffHTML })
   } },
-  { id: 'case-converter', name: 'Case Converter', category: 'Text tools', mount: c => {
-    buildIOPanel(c, { inputLabel: 'Text', outputLabel: 'All case variants', actionLabel: 'Convert', transform: toCaseVariants, liveUpdate: true })
-  } },
-  { id: 'markdown-preview', name: 'Markdown Preview', category: 'Text tools', mount: c => {
-    ensureMermaidInitialized()
-    buildIOPanel(c, {
-      inputLabel: 'Markdown', outputLabel: 'Rendered preview', actionLabel: 'Render',
-      placeholder: '# Hello\n\nSome **bold** and *italic* text, a [link](https://example.com), and:\n\n- one\n- two\n\n```mermaid\nflowchart LR\n  A[Start] --> B{Ready?}\n  B -- Yes --> C[Ship it]\n  B -- No --> A\n```',
-      transform: markdownToHTML, renderOutput: html => html, liveUpdate: true,
-      afterRender: el => {
-        const diagrams = el.querySelectorAll<HTMLElement>('.mermaid')
-        if (diagrams.length) void mermaid.run({ nodes: Array.from(diagrams) }).catch(() => { /* mermaid already renders its own error node on bad syntax */ })
-      },
-    })
-  } },
+  { id: 'case-converter', name: 'Case Converter', category: 'Text tools', mount: mountCaseConverter },
+  { id: 'markdown-preview', name: 'Markdown Preview', category: 'Text tools', mount: mountMarkdownPreview },
   { id: 'regex-tester', name: 'Regex Tester', category: 'Text tools', mount: c => {
     const wrap = document.createElement('div')
     wrap.className = 'utility-io-panel'
@@ -1403,20 +1952,20 @@ const tools: UtilityTool[] = [
       <label class="utility-field"><span>Flags</span><input class="search-input utility-regex-flags" value="g"></label>
       <label class="utility-field"><span>Test text</span><textarea class="utility-textarea utility-regex-text"></textarea></label>
       <div class="security-toolbar"><button class="btn-primary utility-run-btn">Test</button></div>
-      <label class="utility-field"><span>Matches</span><textarea class="utility-textarea" readonly></textarea></label>
+      <label class="utility-field utility-output-field"><span>Matches</span><pre class="utility-textarea utility-generated-output utility-regex-output"></pre></label>
       <p class="resource-detail tool-action-failed utility-error" style="display:none"></p>`
     c.appendChild(wrap)
     const pattern = wrap.querySelector<HTMLInputElement>('.utility-regex-pattern')!
     const flags = wrap.querySelector<HTMLInputElement>('.utility-regex-flags')!
     const text = wrap.querySelector<HTMLTextAreaElement>('.utility-regex-text')!
-    const output = wrap.querySelectorAll<HTMLTextAreaElement>('.utility-textarea')[1]
+    const output = wrap.querySelector<HTMLElement>('.utility-regex-output')!
     const errorEl = wrap.querySelector<HTMLElement>('.utility-error')!
     const run = () => {
       try {
-        output.value = testRegex(pattern.value, flags.value, text.value)
+        output.textContent = testRegex(pattern.value, flags.value, text.value)
         errorEl.style.display = 'none'
       } catch (error) {
-        output.value = ''
+        output.textContent = ''
         errorEl.textContent = String(error instanceof Error ? error.message : error)
         errorEl.style.display = 'block'
       }
@@ -1481,8 +2030,8 @@ const tools: UtilityTool[] = [
 
   { id: 'env-compare', name: '.env Compare', category: 'Data formats', mount: c => {
     buildTwoInputPanel(c, {
-      labelA: '.env A', labelB: '.env B', outputLabel: 'Differences (secret-looking keys are masked)',
-      actionLabel: 'Compare', transform: diffEnv,
+      labelA: 'Original .env (A)', labelB: 'Modified .env (B)', outputLabel: '.env changes · secret values masked',
+      actionLabel: 'Compare', transform: diffEnv, renderOutput: result => renderKeyedDiffHTML(result, '.env'),
     })
   } },
 ]

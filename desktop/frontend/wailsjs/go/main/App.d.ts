@@ -3,6 +3,7 @@
 import {main} from '../models';
 import {cron} from '../models';
 import {security} from '../models';
+import {context} from '../models';
 
 export function AddAssignees(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
@@ -50,6 +51,8 @@ export function DeleteBranch(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteClipboardEntry(arg1:string):Promise<Array<main.ClipboardEntry>>;
 
+export function DeleteInstalledApp(arg1:string):Promise<void>;
+
 export function DisableGitEvents(arg1:string):Promise<main.ActivitySummary>;
 
 export function DownloadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
@@ -67,6 +70,8 @@ export function GetActivity(arg1:boolean):Promise<main.ActivitySummary>;
 export function GetAppVersion():Promise<string>;
 
 export function GetClipboardHistoryEnabled():Promise<boolean>;
+
+export function GetContainerRuntimeStatus():Promise<main.ContainerRuntimeStatus>;
 
 export function GetEnvFileContent(arg1:string,arg2:string):Promise<string>;
 
@@ -98,6 +103,8 @@ export function GitHubSetToken(arg1:string):Promise<void>;
 
 export function GitHubStatus(arg1:string):Promise<main.GitHubStatus>;
 
+export function HasVSCode():Promise<boolean>;
+
 export function HealthHistory(arg1:string):Promise<Array<main.HealthSamplePoint>>;
 
 export function IgnoreRepository(arg1:string):Promise<main.ActivitySummary>;
@@ -107,6 +114,8 @@ export function ImportConfig():Promise<main.ConfigBackup>;
 export function InstallAndLoginGitHubCLI():Promise<void>;
 
 export function InstallBrewPackage(arg1:string,arg2:boolean):Promise<string>;
+
+export function InstallColima():Promise<void>;
 
 export function InstallGitHook(arg1:string,arg2:string):Promise<void>;
 
@@ -159,6 +168,8 @@ export function OpenContainerTerminal(arg1:string):Promise<void>;
 export function OpenFileAtLine(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function OpenInstalledApp(arg1:string):Promise<void>;
+
+export function OpenPathInFinder(arg1:string):Promise<void>;
 
 export function OpenServerTerminal(arg1:string):Promise<string>;
 
@@ -220,6 +231,8 @@ export function RepoFile(arg1:string,arg2:string):Promise<string>;
 
 export function RepoFiles(arg1:string,arg2:string):Promise<Array<main.RepoEntry>>;
 
+export function RepoGitHubOwner(arg1:string):Promise<string>;
+
 export function RepoGraph(arg1:string,arg2:number):Promise<Array<main.GraphCommit>>;
 
 export function RequestReviewers(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
@@ -274,7 +287,11 @@ export function StageFile(arg1:string,arg2:string):Promise<void>;
 
 export function StartContainer(arg1:string):Promise<void>;
 
+export function StartContainerRuntime(arg1:string):Promise<void>;
+
 export function StartServerContainer(arg1:string,arg2:string):Promise<void>;
+
+export function Startup(arg1:context.Context):Promise<void>;
 
 export function StashList(arg1:string):Promise<Array<string>>;
 
@@ -283,6 +300,8 @@ export function StashPop(arg1:string):Promise<void>;
 export function StashSave(arg1:string):Promise<void>;
 
 export function StopContainer(arg1:string):Promise<void>;
+
+export function StopContainerRuntime(arg1:string):Promise<void>;
 
 export function StopProcess(arg1:number):Promise<void>;
 
@@ -295,6 +314,8 @@ export function SwitchGitHubCLIAccount(arg1:string):Promise<void>;
 export function ToggleConfigFile(arg1:string):Promise<boolean>;
 
 export function ToggleFullscreen():Promise<boolean>;
+
+export function ToggleTelemetry():Promise<boolean>;
 
 export function ToolActionStatus(arg1:string):Promise<main.ToolActionStatus>;
 

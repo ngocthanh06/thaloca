@@ -94,6 +94,10 @@ export function DeleteClipboardEntry(arg1) {
   return window['go']['main']['App']['DeleteClipboardEntry'](arg1);
 }
 
+export function DeleteInstalledApp(arg1) {
+  return window['go']['main']['App']['DeleteInstalledApp'](arg1);
+}
+
 export function DisableGitEvents(arg1) {
   return window['go']['main']['App']['DisableGitEvents'](arg1);
 }
@@ -128,6 +132,10 @@ export function GetAppVersion() {
 
 export function GetClipboardHistoryEnabled() {
   return window['go']['main']['App']['GetClipboardHistoryEnabled']();
+}
+
+export function GetContainerRuntimeStatus() {
+  return window['go']['main']['App']['GetContainerRuntimeStatus']();
 }
 
 export function GetEnvFileContent(arg1, arg2) {
@@ -190,6 +198,10 @@ export function GitHubStatus(arg1) {
   return window['go']['main']['App']['GitHubStatus'](arg1);
 }
 
+export function HasVSCode() {
+  return window['go']['main']['App']['HasVSCode']();
+}
+
 export function HealthHistory(arg1) {
   return window['go']['main']['App']['HealthHistory'](arg1);
 }
@@ -208,6 +220,10 @@ export function InstallAndLoginGitHubCLI() {
 
 export function InstallBrewPackage(arg1, arg2) {
   return window['go']['main']['App']['InstallBrewPackage'](arg1, arg2);
+}
+
+export function InstallColima() {
+  return window['go']['main']['App']['InstallColima']();
 }
 
 export function InstallGitHook(arg1, arg2) {
@@ -312,6 +328,10 @@ export function OpenFileAtLine(arg1, arg2, arg3) {
 
 export function OpenInstalledApp(arg1) {
   return window['go']['main']['App']['OpenInstalledApp'](arg1);
+}
+
+export function OpenPathInFinder(arg1) {
+  return window['go']['main']['App']['OpenPathInFinder'](arg1);
 }
 
 export function OpenServerTerminal(arg1) {
@@ -434,6 +454,10 @@ export function RepoFiles(arg1, arg2) {
   return window['go']['main']['App']['RepoFiles'](arg1, arg2);
 }
 
+export function RepoGitHubOwner(arg1) {
+  return window['go']['main']['App']['RepoGitHubOwner'](arg1);
+}
+
 export function RepoGraph(arg1, arg2) {
   return window['go']['main']['App']['RepoGraph'](arg1, arg2);
 }
@@ -542,8 +566,16 @@ export function StartContainer(arg1) {
   return window['go']['main']['App']['StartContainer'](arg1);
 }
 
+export function StartContainerRuntime(arg1) {
+  return window['go']['main']['App']['StartContainerRuntime'](arg1);
+}
+
 export function StartServerContainer(arg1, arg2) {
   return window['go']['main']['App']['StartServerContainer'](arg1, arg2);
+}
+
+export function Startup(arg1) {
+  return window['go']['main']['App']['Startup'](arg1);
 }
 
 export function StashList(arg1) {
@@ -560,6 +592,10 @@ export function StashSave(arg1) {
 
 export function StopContainer(arg1) {
   return window['go']['main']['App']['StopContainer'](arg1);
+}
+
+export function StopContainerRuntime(arg1) {
+  return window['go']['main']['App']['StopContainerRuntime'](arg1);
 }
 
 export function StopProcess(arg1) {
@@ -584,6 +620,10 @@ export function ToggleConfigFile(arg1) {
 
 export function ToggleFullscreen() {
   return window['go']['main']['App']['ToggleFullscreen']();
+}
+
+export function ToggleTelemetry() {
+  return window['go']['main']['App']['ToggleTelemetry']();
 }
 
 export function ToolActionStatus(arg1) {

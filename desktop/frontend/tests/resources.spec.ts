@@ -24,6 +24,30 @@ test('Resources process table has a Stop action and sortable CPU/Mem/PID headers
   expect(errors).toEqual([])
 })
 
+test('Stop process shows pending state and suppresses duplicate requests', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await installMockApp(page)
+  await page.addInitScript(() => { (window as any).__holdStopProcess = true })
+  await page.goto('/')
+  await page.evaluate(() => {
+    document.getElementById('splash-screen')?.remove()
+  })
+  await page.click('.nav-btn[data-view="resources"]')
+  const stop = page.locator('[data-stop-pid="100"]')
+  await expect(stop).toBeVisible()
+  expect(errors).toEqual([])
+  expect(await page.evaluate(() => (window as any).__holdStopProcess)).toBe(true)
+  await stop.evaluate((button: HTMLButtonElement) => button.click())
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'StopProcess').length)).toBe(1)
+  await expect(stop).toBeDisabled()
+  await expect(stop).toHaveText('Stopping…')
+  await stop.evaluate((button: HTMLButtonElement) => button.click())
+  expect(await page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'StopProcess').length)).toBe(1)
+  await page.evaluate(() => (window as any).__finishStop())
+  await expect(page.locator('[data-stop-pid="100"]')).toBeEnabled()
+})
+
 test('Resources Applications section lists installed apps with live usage, above Disks', async ({ page }) => {
   await installMockApp(page)
   await page.goto('/')

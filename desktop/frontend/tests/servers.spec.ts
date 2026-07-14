@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { installMockApp } from './mockApp'
 
-test('Servers shows environment tag, key warning, and parsed health card', async ({ page }) => {
+test('Servers shows environment tag, key warning, and parsed health summary', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', e => errors.push(e.message))
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
@@ -15,13 +15,12 @@ test('Servers shows environment tag, key warning, and parsed health card', async
 
   // The key permission warning is fetched alongside Check (not on load).
   await page.click('[data-server-check]')
-  await page.waitForSelector('.server-health')
+  await page.waitForSelector('.server-status-online')
   await expect(page.locator('.server-key-warning')).toContainText('readable by group/other')
-  const health = page.locator('.server-health')
-  await expect(health).toContainText('5 days')
-  await expect(health).toContainText('3.2G used')
-  await expect(health).toContainText('48%')
-  await expect(health).toContainText('api')
+  const row = page.locator('.server-row')
+  await expect(row).toContainText('5 days')
+  await expect(row).toContainText('48%')
+  await expect(row.locator('.server-action-badge')).toHaveText('1')
 
   expect(errors).toEqual([])
 })

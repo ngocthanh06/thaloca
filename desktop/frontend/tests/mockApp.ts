@@ -7,6 +7,10 @@ import type { Page } from '@playwright/test'
 export async function installMockApp(page: Page): Promise<void> {
   const now = Date.now()
   await page.addInitScript((now) => {
+    ;(window as any).runtime = {
+      EventsOnMultiple: () => () => undefined,
+      BrowserOpenURL: () => undefined,
+    }
     const repo1 = '/repo/shop-api'
     // Records mutation calls (stage/unstage/commit/branch ops/...) so tests
     // can assert the right backend call happened with the right arguments,
@@ -133,7 +137,17 @@ export async function installMockApp(page: Page): Promise<void> {
           }),
           RunToolAction: async (tool: string, action: string) => { record('RunToolAction', tool, action); return 'job-1' },
           ToolActionStatus: async () => ({ running: false, output: 'done', exit_code: 0 }),
-          StopProcess: async (pid: number) => { record('StopProcess', pid) },
+          StopProcess: async (pid: number) => {
+            record('StopProcess', pid)
+            if ((window as any).__holdStopProcess) {
+              await new Promise<void>(resolve => { (window as any).__finishStop = resolve })
+            }
+          },
+          GetContainerRuntimeStatus: async () => {
+            record('GetContainerRuntimeStatus')
+            return (window as any).__containerRuntimeStatus || { engines: [], multiple_running: false, homebrew_available: false }
+          },
+          StopContainerRuntime: async (kind: string) => { record('StopContainerRuntime', kind) },
         },
       },
     }
