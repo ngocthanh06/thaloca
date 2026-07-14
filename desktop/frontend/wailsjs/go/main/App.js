@@ -318,6 +318,10 @@ export function OpenServerTerminal(arg1) {
   return window['go']['main']['App']['OpenServerTerminal'](arg1);
 }
 
+export function PerformSelfUpdate() {
+  return window['go']['main']['App']['PerformSelfUpdate']();
+}
+
 export function PickDownloadFolder() {
   return window['go']['main']['App']['PickDownloadFolder']();
 }

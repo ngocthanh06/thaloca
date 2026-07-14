@@ -493,13 +493,16 @@ const vi: Record<string, string> = {
   'Could not save settings:': 'Không thể lưu cài đặt:',
   Updates: 'Cập nhật',
   Version: 'Phiên bản',
-  "Checking only looks for a newer GitHub release and links to it — Thaloca doesn't download or install updates itself.":
-    'Việc kiểm tra chỉ tìm bản phát hành GitHub mới hơn và liên kết đến đó — Thaloca không tự tải hoặc cài đặt bản cập nhật.',
+  'Checking looks for a newer GitHub release. "Update now" downloads and installs it, then restarts Thaloca — nothing happens without confirming first.':
+    'Kiểm tra sẽ tìm bản phát hành GitHub mới hơn. "Update now" sẽ tải và cài đặt, sau đó khởi động lại Thaloca — không có gì xảy ra nếu chưa xác nhận.',
   'Check for updates': 'Kiểm tra cập nhật',
   'Could not check for updates:': 'Không thể kiểm tra cập nhật:',
   'is available.': 'đã có sẵn.',
   'Open release page': 'Mở trang phát hành',
   "You're on the latest version.": 'Bạn đang dùng phiên bản mới nhất.',
+  'Update now': 'Cập nhật ngay',
+  'Updating…': 'Đang cập nhật…',
+  'Could not update:': 'Không thể cập nhật:',
 }
 
 const dictionaries: Record<Locale, Record<string, string>> = { en: {}, vi }
