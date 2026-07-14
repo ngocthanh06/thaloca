@@ -139,6 +139,21 @@ export interface EnvFileSummary {
   keys: string[]
 }
 
+// One container engine (Docker Desktop, OrbStack, or Colima) as reported
+// by GetContainerRuntimeStatus — see desktop/containerRuntime.go.
+export interface RuntimeEngineStatus {
+  kind: 'docker-desktop' | 'orbstack' | 'colima'
+  name: string
+  installed: boolean
+  running: boolean
+}
+
+export interface ContainerRuntimeStatus {
+  engines: RuntimeEngineStatus[]
+  multiple_running: boolean
+  homebrew_available: boolean
+}
+
 // One config file (or, for category "telemetry", one setting read out of a
 // config file) shown in the Config Files view. Only "shell" entries can be
 // toggleable (and even then, only when their source line is guarded and
@@ -426,6 +441,7 @@ export interface ToolInfo {
   install_command?: string
   update_command?: string
   managed_by?: string
+  install_blocked_reason?: string
 }
 
 export interface ProjectToolRequirement {
@@ -576,6 +592,7 @@ export interface InstalledApp {
   running: boolean
   cpu_percent: number
   mem_percent: number
+  icon?: string
 }
 
 export interface NotificationSettings {
@@ -805,6 +822,7 @@ interface WailsApp {
   PerformSelfUpdate(): Promise<void>
   OpenInstalledApp(path: string): Promise<void>
   QuitInstalledApp(bundleId: string): Promise<void>
+  DeleteInstalledApp(path: string): Promise<void>
   Tools(): Promise<Partial<ToolsSnapshot>>
   RefreshTools(): Promise<Partial<ToolsSnapshot>>
   RunToolAction(tool: string, action: string): Promise<string>
@@ -941,6 +959,11 @@ interface WailsApp {
   GetEnvFileContent(projectPath: string, fileName: string): Promise<string>
   ListConfigFiles(): Promise<ConfigFileEntry[]>
   ToggleConfigFile(path: string): Promise<boolean>
+  ToggleTelemetry(): Promise<boolean>
+  GetContainerRuntimeStatus(): Promise<ContainerRuntimeStatus>
+  StartContainerRuntime(kind: string): Promise<void>
+  StopContainerRuntime(kind: string): Promise<void>
+  InstallColima(): Promise<void>
 }
 
 declare global {
@@ -1007,6 +1030,10 @@ export const api = {
   quitInstalledApp: (bundleId: string): Promise<void> => {
     const fn = wailsApp()?.QuitInstalledApp
     return fn ? fn(bundleId) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  deleteInstalledApp: (path: string): Promise<void> => {
+    const fn = wailsApp()?.DeleteInstalledApp
+    return fn ? fn(path) : Promise.reject(new Error('Wails runtime not available'))
   },
   tools: (): Promise<ToolsSnapshot> => {
     const fn = wailsApp()?.Tools
@@ -1293,4 +1320,12 @@ export const api = {
   listConfigFiles: (): Promise<ConfigFileEntry[]> => wailsApp()?.ListConfigFiles?.() || Promise.resolve([]),
   toggleConfigFile: (path: string): Promise<boolean> =>
     wailsApp()?.ToggleConfigFile?.(path) || Promise.reject('native not available'),
+  toggleTelemetry: (): Promise<boolean> => wailsApp()?.ToggleTelemetry?.() || Promise.reject('native not available'),
+  getContainerRuntimeStatus: (): Promise<ContainerRuntimeStatus> =>
+    wailsApp()?.GetContainerRuntimeStatus?.() || Promise.resolve({ engines: [], multiple_running: false, homebrew_available: false }),
+  startContainerRuntime: (kind: string): Promise<void> =>
+    wailsApp()?.StartContainerRuntime?.(kind) || Promise.reject('native not available'),
+  stopContainerRuntime: (kind: string): Promise<void> =>
+    wailsApp()?.StopContainerRuntime?.(kind) || Promise.reject('native not available'),
+  installColima: (): Promise<void> => wailsApp()?.InstallColima?.() || Promise.reject('native not available'),
 }

@@ -32,6 +32,13 @@ type ToolInfo struct {
 	// in toolActions.go), since adding a separate Homebrew-managed copy
 	// wouldn't replace what the version manager already provides.
 	ManagedBy string `json:"managed_by,omitempty"`
+	// InstallBlockedReason explains why InstallCommand is empty even though
+	// this tool isn't installed and isn't ManagedBy anything — its install
+	// spec exists, but the spec's own prerequisite binary (almost always
+	// Homebrew) isn't on this machine yet. Without this, a brand-new Mac
+	// with no Homebrew shows every installable tool as a dead end with no
+	// explanation (see applyToolActionCommands in toolActions.go).
+	InstallBlockedReason string `json:"install_blocked_reason,omitempty"`
 }
 
 // ProjectToolRequirement is one discovered repo whose manifest files imply

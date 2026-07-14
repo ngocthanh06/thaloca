@@ -14,10 +14,10 @@ import (
 )
 
 // ConfigFileEntry describes one config file (or one telemetry setting found
-// inside a config file) for the Config Files view. Only "shell" and "home"
-// entries are ever toggleable — see the safety notes on ToggleConfigFile
-// below for why global tool/telemetry config files are deliberately
-// read-only here.
+// inside a config file) for the Config Files view. "shell", "home", and
+// "tool" entries can be toggleable — see the safety notes on
+// ToggleConfigFile below. "telemetry" entries are always read-only: they're
+// settings read out of a file, not a file of their own to rename.
 type ConfigFileEntry struct {
 	ID            string `json:"id"`
 	Category      string `json:"category"` // "shell" | "home" | "tool" | "telemetry"
@@ -37,11 +37,13 @@ type toolConfigDef struct {
 	description string
 }
 
-// toolConfigDefs are well-known global dev-tool config files. They're
-// listed for visibility only (existence + description) — most of them mix
-// auth/identity with other settings (npm registry tokens, git identity,
-// Docker credentials, Claude Code login state), so renaming one away to
-// "disable" it would break far more than whatever a user might want off.
+// toolConfigDefs are well-known global dev-tool config files. Toggleable
+// the same way as shell/home entries (rename to/from "<name>.disabled"),
+// but most of them mix auth/identity with other settings (npm registry
+// tokens, git identity, Docker credentials, Claude Code login state), so
+// disabling one can break login/auth for that tool until it's switched
+// back on — the frontend's confirm dialog spells out what each one holds
+// before renaming it.
 var toolConfigDefs = []toolConfigDef{
 	{"Git global config", ".gitconfig", "Global git identity, aliases, and defaults for this machine."},
 	{"npm global config", ".npmrc", "Global npm registry and auth settings for this machine."},
@@ -253,7 +255,7 @@ func filesInDir(dir string, requireDotPrefix bool, skip map[string]bool, describ
 // package-manager caches, ...) hold thousands of irrelevant files, and this
 // keeps the sweep fast and focused on what's actually config. ".docker" and
 // ".claude" are intentionally excluded — they're already represented
-// read-only via toolConfigDefs/telemetryEntries, so scanning them here too
+// via toolConfigDefs/telemetryEntries, so scanning them here too
 // would just duplicate those rows (or, for .claude, expose per-project
 // history that isn't meant to be surfaced this broadly).
 var knownHiddenConfigDirs = []string{".ssh", ".aws", ".gnupg", ".kube", ".azure", ".m2", ".terraform.d"}
@@ -382,52 +384,84 @@ func toolConfigEntries() []ConfigFileEntry {
 	var entries []ConfigFileEntry
 	for _, def := range toolConfigDefs {
 		full := filepath.Join(home, def.relPath)
-		info, statErr := os.Stat(full)
-		exists := statErr == nil && !info.IsDir()
+		disabledPath := full + ".disabled"
+		activeInfo, activeErr := os.Stat(full)
+		_, disabledErr := os.Stat(disabledPath)
+
+		// A directory (rare, but possible for a hand-edited path) isn't a
+		// config file to rename.
+		if activeErr == nil && activeInfo.IsDir() {
+			entries = append(entries, ConfigFileEntry{
+				ID:          full,
+				Category:    "tool",
+				Name:        def.name,
+				Path:        full,
+				Exists:      true,
+				Enabled:     true,
+				Toggleable:  false,
+				Description: def.description,
+			})
+			continue
+		}
+
 		entries = append(entries, ConfigFileEntry{
-			ID:          full,
-			Category:    "tool",
-			Name:        def.name,
-			Path:        full,
-			Exists:      exists,
-			Enabled:     exists,
-			Toggleable:  false,
+			ID:       full,
+			Category: "tool",
+			Name:     def.name,
+			Path:     full,
+			Exists:   activeErr == nil || disabledErr == nil,
+			Enabled:  activeErr == nil,
+			// Always toggleable, even when neither the active nor
+			// ".disabled" name exists yet — "Enable" then creates a fresh
+			// empty file instead of renaming one into place (see
+			// ToggleConfigFile), so a tool with no config file here yet can
+			// still be switched on from scratch.
+			Toggleable:  true,
 			Description: def.description,
 		})
 	}
 	return entries
 }
 
-// telemetryEntries reads Claude Code's settings.json (if present) and
-// reports, read-only, which known telemetry-related environment variables
-// are set inside its "env" block. It never edits this file: the same
-// variables can also be set as real shell environment variables, which a
-// file scan can't see, so this is inventory information rather than a
-// reliable on/off switch.
-func telemetryEntries() []ConfigFileEntry {
+// claudeSettingsPath is ~/.claude/settings.json, read by telemetryEntries
+// and read-modify-written by ToggleTelemetry.
+func claudeSettingsPath() (string, error) {
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".claude", "settings.json"), nil
+}
+
+// telemetryDisabled reports whether DISABLE_TELEMETRY is set to a truthy
+// value in a settings.json "env" block — the same check ToggleTelemetry
+// uses to decide which direction to flip.
+func telemetryDisabled(env map[string]string) bool {
+	v := env["DISABLE_TELEMETRY"]
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// telemetryEntries reads Claude Code's settings.json (if present) and
+// reports which known telemetry-related environment variables are set
+// inside its "env" block. Toggleable via ToggleTelemetry — "Enabled" means
+// telemetry is flowing normally (no disable flags set), same convention as
+// every other entry's Enabled/Disabled badge. The same variables can also
+// be set as real shell environment variables, invisible to a file scan,
+// which can override whatever this toggle writes here — the description
+// says so either way.
+func telemetryEntries() []ConfigFileEntry {
+	settingsPath, err := claudeSettingsPath()
 	if err != nil {
 		return nil
 	}
-	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	data, readErr := os.ReadFile(settingsPath)
-	if readErr != nil {
-		return []ConfigFileEntry{{
-			ID:          settingsPath + "\x1ftelemetry",
-			Category:    "telemetry",
-			Name:        "Claude Code telemetry",
-			Path:        settingsPath,
-			Exists:      false,
-			Enabled:     false,
-			Toggleable:  false,
-			Description: "No settings.json found here. Claude Code telemetry is controlled by env vars like CLAUDE_CODE_ENABLE_TELEMETRY, set either in your shell profile or in this file's \"env\" block — Thaloca only reads the file, never your shell environment.",
-		}}
-	}
 
 	var parsed struct {
 		Env map[string]string `json:"env"`
 	}
-	_ = json.Unmarshal(data, &parsed)
+	if readErr == nil {
+		_ = json.Unmarshal(data, &parsed)
+	}
 
 	var found []string
 	for _, key := range claudeTelemetryEnvKeys {
@@ -441,38 +475,38 @@ func telemetryEntries() []ConfigFileEntry {
 		Category:   "telemetry",
 		Name:       "Claude Code telemetry",
 		Path:       settingsPath,
-		Exists:     true,
-		Enabled:    false,
-		Toggleable: false,
+		Exists:     readErr == nil,
+		Enabled:    !telemetryDisabled(parsed.Env),
+		Toggleable: true,
 	}
 	if len(found) == 0 {
-		entry.Description = "None of Claude Code's telemetry env vars (CLAUDE_CODE_ENABLE_TELEMETRY, DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, DISABLE_NON_ESSENTIAL_MODEL_CALLS) are set in this file's \"env\" block. They may still be set as real shell environment variables, which this can't see."
+		entry.Description = "None of Claude Code's telemetry env vars (CLAUDE_CODE_ENABLE_TELEMETRY, DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, DISABLE_NON_ESSENTIAL_MODEL_CALLS) are set in this file's \"env\" block yet. They may still be set as real shell environment variables, which this can't see or override."
 		entry.DetectedValue = "not set in settings.json"
 	} else {
-		entry.Description = "Values read from this file's \"env\" block."
+		entry.Description = "Values read from this file's \"env\" block. May be overridden by the same variables set as real shell environment variables, which this can't see."
 		entry.DetectedValue = strings.Join(found, ", ")
 	}
 	return []ConfigFileEntry{entry}
 }
 
 // toggleableCandidates recomputes every entry ToggleConfigFile is allowed to
-// act on — shell-sourced files plus general home dotfiles — fresh from
-// disk each time, so a stale/forged path from the frontend can't reach
-// anything not currently offered as toggleable.
+// act on — shell-sourced files, general home dotfiles, and well-known tool
+// config files — fresh from disk each time, so a stale/forged path from the
+// frontend can't reach anything not currently offered as toggleable.
 func (a *App) toggleableCandidates() []ConfigFileEntry {
 	shell := shellSourcedEntries()
 	candidates := append([]ConfigFileEntry{}, shell...)
 	candidates = append(candidates, homeDotfileEntries(shell)...)
+	candidates = append(candidates, toolConfigEntries()...)
 	return candidates
 }
 
 // ListConfigFiles returns every known config file entry across all
-// categories. Only "shell" and "home" entries can be toggleable; tool and
-// telemetry entries are informational only (see ToggleConfigFile).
+// categories. "shell", "home", and "tool" entries can be toggleable;
+// "telemetry" entries are informational only (see ToggleConfigFile).
 func (a *App) ListConfigFiles() []ConfigFileEntry {
 	var entries []ConfigFileEntry
 	entries = append(entries, a.toggleableCandidates()...)
-	entries = append(entries, toolConfigEntries()...)
 	entries = append(entries, telemetryEntries()...)
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].Category != entries[j].Category {
@@ -483,12 +517,13 @@ func (a *App) ListConfigFiles() []ConfigFileEntry {
 	return entries
 }
 
-// ToggleConfigFile flips one shell-sourced or home-dotfile config file
-// between active ("<name>") and disabled ("<name>.disabled") by renaming
-// it, and returns the new enabled state. path must match a currently
-// toggleable entry re-derived here, never trusted as given directly — same
-// access model as envFiles.go's validateEnvFileAccess. This is why tool and
-// telemetry entries (never toggleable) can't reach this at all.
+// ToggleConfigFile flips one shell-sourced, home-dotfile, or well-known
+// tool config file between active ("<name>") and disabled
+// ("<name>.disabled") by renaming it, and returns the new enabled state.
+// path must match a currently toggleable entry re-derived here, never
+// trusted as given directly — same access model as envFiles.go's
+// validateEnvFileAccess. This is why telemetry entries (never toggleable)
+// can't reach this at all.
 func (a *App) ToggleConfigFile(path string) (bool, error) {
 	var match *ConfigFileEntry
 	for _, entry := range a.toggleableCandidates() {
@@ -509,8 +544,109 @@ func (a *App) ToggleConfigFile(path string) (bool, error) {
 		}
 		return false, nil
 	}
+	if _, err := os.Stat(disabledPath); err != nil {
+		// A "tool" entry with neither the active nor ".disabled" name on
+		// disk yet (e.g. no ~/.npmrc at all) — "Enable" creates a fresh
+		// empty file rather than renaming one into place, since there's
+		// nothing to rename from.
+		if match.Category != "tool" {
+			return false, err
+		}
+		if err := os.WriteFile(match.Path, nil, 0o644); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	if err := os.Rename(disabledPath, match.Path); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// ToggleTelemetry flips all four telemetry-related env vars Claude Code
+// checks (claudeTelemetryEnvKeys) together, writing directly into
+// ~/.claude/settings.json's "env" block, and returns the new Enabled state
+// (true = telemetry flowing normally). This is a separate RPC from
+// ToggleConfigFile — not just another toggleable candidate — because its
+// path is the same settings.json the "Claude Code settings" tool entry
+// already represents; routing it through the generic path-matching
+// ToggleConfigFile would rename that file instead of editing its env
+// block. Every other top-level key (and every other key already inside
+// "env") is round-tripped as raw JSON, untouched, so hooks/plugins/other
+// settings survive intact. Disabling sets all four explicitly; enabling
+// removes all four, returning to Claude Code's own defaults. Creates
+// settings.json (containing just this "env" block) if it doesn't exist
+// yet, same "Enable creates it from scratch" behavior as ToggleConfigFile's
+// tool entries.
+func (a *App) ToggleTelemetry() (bool, error) {
+	settingsPath, err := claudeSettingsPath()
+	if err != nil {
+		return false, err
+	}
+
+	root := map[string]json.RawMessage{}
+	if data, readErr := os.ReadFile(settingsPath); readErr == nil {
+		if err := json.Unmarshal(data, &root); err != nil {
+			return false, fmt.Errorf("settings.json isn't valid JSON: %w", err)
+		}
+	} else if !os.IsNotExist(readErr) {
+		return false, readErr
+	}
+
+	env := map[string]json.RawMessage{}
+	if raw, ok := root["env"]; ok {
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return false, fmt.Errorf("settings.json's \"env\" block isn't a JSON object: %w", err)
+		}
+	}
+
+	stringEnv := map[string]string{}
+	for k, raw := range env {
+		var v string
+		if json.Unmarshal(raw, &v) == nil {
+			stringEnv[k] = v
+		}
+	}
+	wasDisabled := telemetryDisabled(stringEnv)
+
+	if wasDisabled {
+		for _, key := range claudeTelemetryEnvKeys {
+			delete(env, key)
+		}
+	} else {
+		for key, value := range map[string]string{
+			"DISABLE_TELEMETRY":                 "true",
+			"DISABLE_ERROR_REPORTING":           "true",
+			"DISABLE_NON_ESSENTIAL_MODEL_CALLS": "true",
+			"CLAUDE_CODE_ENABLE_TELEMETRY":      "false",
+		} {
+			b, err := json.Marshal(value)
+			if err != nil {
+				return false, err
+			}
+			env[key] = b
+		}
+	}
+
+	if len(env) == 0 {
+		delete(root, "env")
+	} else {
+		b, err := json.Marshal(env)
+		if err != nil {
+			return false, err
+		}
+		root["env"] = b
+	}
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
+		return false, err
+	}
+	return wasDisabled, nil
 }

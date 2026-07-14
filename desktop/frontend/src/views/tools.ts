@@ -192,6 +192,7 @@ function renderToolCard(tool: ToolInfo): string {
       <p class="resource-detail">${tool.installed ? escapeHTML(tool.version || tool.command) : `${t('Not found on PATH')} (${escapeHTML(tool.command)})`}</p>
       ${tool.installed && tool.path ? `<p class="resource-detail muted" title="${escapeHTML(tool.path)}">${escapeHTML(tool.path)}</p>` : ''}
       ${tool.managed_by ? `<p class="resource-detail muted">${t('Managed by')} ${escapeHTML(tool.managed_by)} — ${t('Install/Update not offered here to avoid a conflicting Homebrew copy.')}</p>` : ''}
+      ${!action && tool.install_blocked_reason ? `<p class="resource-detail muted">${escapeHTML(t(tool.install_blocked_reason))}</p>` : ''}
       ${action ? `<div class="tool-card-actions">${action}</div>` : ''}
     </article>`
 }

@@ -82,7 +82,10 @@ var updateSpecs = map[string]toolActionSpec{
 
 // applyToolActionCommands fills in InstallCommand/UpdateCommand on each
 // ToolInfo, but only when the spec's own binary (almost always brew) is
-// itself installed — otherwise the button would just fail immediately.
+// itself installed — otherwise the button would just fail immediately. When
+// that prerequisite is missing, InstallBlockedReason explains why instead
+// of just leaving the tool with no action and no explanation (the common
+// case on a brand-new Mac with no Homebrew yet).
 func applyToolActionCommands(tools []ToolInfo, installed map[string]bool) {
 	for i := range tools {
 		t := &tools[i]
@@ -92,14 +95,33 @@ func applyToolActionCommands(tools []ToolInfo, installed map[string]bool) {
 			continue
 		}
 		if !t.Installed {
-			if spec, ok := installSpecs[t.Command]; ok && installed[spec.Bin] {
-				t.InstallCommand = spec.display()
+			if spec, ok := installSpecs[t.Command]; ok {
+				if installed[spec.Bin] {
+					t.InstallCommand = spec.display()
+				} else {
+					t.InstallBlockedReason = installPrereqMessage(spec.Bin)
+				}
 			}
 			continue
 		}
 		if spec, ok := updateSpecs[t.Command]; ok && installed[spec.Bin] {
 			t.UpdateCommand = spec.display()
 		}
+	}
+}
+
+// installPrereqMessage explains what to install first when an install
+// spec's own binary (bin) isn't present yet. Thaloca deliberately never
+// runs Homebrew's own install script itself (see installSpecs' comment on
+// why), so this is guidance, not something Install here can fix directly.
+func installPrereqMessage(bin string) string {
+	switch bin {
+	case "brew":
+		return "Requires Homebrew — install it from https://brew.sh, then refresh this tab."
+	case "go":
+		return "Requires Go — install Go first (e.g. from https://go.dev/dl/), then refresh this tab."
+	default:
+		return "Requires " + bin + " to be installed first, then refresh this tab."
 	}
 }
 

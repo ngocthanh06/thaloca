@@ -8,10 +8,22 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"thaloca.local/thaloca/internal/discovery"
 )
+
+// processAlive reports whether pid still exists, via the Unix convention of
+// sending signal 0 — delivers nothing, just checks that the process (and
+// this app's permission to signal it) still exists.
+func processAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
 
 func (a *App) StopProcess(pid int) error {
 	if pid <= 0 {
@@ -27,11 +39,31 @@ func (a *App) StopProcess(pid int) error {
 	if err != nil {
 		return err
 	}
+
+	// Ask nicely first (SIGINT). A successfully *delivered* signal only
+	// means the process received it — plenty of GUI/Electron apps ignore
+	// SIGINT outright and keep running, which the old code treated as
+	// "stopped" since it only escalated to SIGKILL when delivery itself
+	// failed. Give it a short grace period to actually exit, then force
+	// it either way.
 	if err := process.Signal(os.Interrupt); err != nil {
-		if err := process.Kill(); err != nil {
-			return err
+		// Couldn't even deliver SIGINT (already gone, or a permission
+		// issue) — go straight to SIGKILL rather than giving up.
+		if killErr := process.Kill(); killErr != nil && processAlive(pid) {
+			return killErr
+		}
+	} else {
+		deadline := time.Now().Add(3 * time.Second)
+		for processAlive(pid) && time.Now().Before(deadline) {
+			time.Sleep(150 * time.Millisecond)
+		}
+		if processAlive(pid) {
+			if killErr := process.Kill(); killErr != nil && processAlive(pid) {
+				return killErr
+			}
 		}
 	}
+
 	a.addEvent("action", fmt.Sprintf("process %d", pid), "", "process", fmt.Sprintf("%d", pid), "stopped", fmt.Sprintf("Process %d stopped", pid))
 	return nil
 }

@@ -1,11 +1,10 @@
 // Config Files view: lists files sourced by shell startup files (e.g. a
 // dedicated claude_telemetry.zsh), well-known global dev-tool config files,
-// and a read-only telemetry inventory for Claude Code. Only "shell" entries
-// can be toggled, and only when doing so is safe (see
-// desktop/configFiles.go) — "tool"/"telemetry" entries are always
-// display-only, since most of them mix auth/identity with whatever setting
-// a user might actually want off, so renaming the whole file would break
-// more than intended.
+// and a Claude Code telemetry inventory. "shell", "home", and "tool"
+// entries toggle by renaming the file to/from "<name>.disabled" (see
+// desktop/configFiles.go's ToggleConfigFile); "telemetry" toggles instead
+// by writing/removing env keys inside settings.json (ToggleTelemetry),
+// since it isn't a file of its own to rename.
 import type { ConfigFileEntry } from '../api'
 import { api } from '../api'
 import { escapeHTML, showError } from '../dom'
@@ -39,18 +38,27 @@ export async function loadConfigFiles(): Promise<void> {
 
 async function toggle(entry: ConfigFileEntry): Promise<void> {
   if (togglingID || !entry.toggleable) return
+  const isTelemetry = entry.category === 'telemetry'
+
   if (entry.enabled) {
-    const scope = entry.source_name ? ` (${t('sourced from')} ${entry.source_name})` : ''
-    if (!(await api.confirmDialog(
-      t('Disable config file'),
-      `${t('Disable')} ${entry.name}${scope}? ${t('This renames it to')} "${entry.name}.disabled" ${t('on disk — nothing is deleted, and you can enable it again the same way.')}`,
-    ))) return
+    let message: string
+    if (isTelemetry) {
+      message = `${t('Disable Claude Code telemetry')}? ${t('This writes DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, and DISABLE_NON_ESSENTIAL_MODEL_CALLS (all "true") plus CLAUDE_CODE_ENABLE_TELEMETRY ("false") into this file\'s "env" block — re-enabling removes all four again. If any of these are also set as real shell environment variables, those can still override this.')}`
+    } else {
+      const scope = entry.source_name ? ` (${t('sourced from')} ${entry.source_name})` : ''
+      // "tool" entries (Git/npm/Docker/Claude Code config) commonly mix real
+      // login/auth state into the same file as ordinary settings — spell out
+      // what's actually inside before renaming it away, since the per-row
+      // description already says so (see toolConfigDefs in configFiles.go).
+      const toolWarning = entry.category === 'tool' ? ` ${entry.description} ${t('Disabling this can affect login, auth, or settings for it until you re-enable it.')}` : ''
+      message = `${t('Disable')} ${entry.name}${scope}?${toolWarning} ${t('This renames it to')} "${entry.name}.disabled" ${t('on disk — nothing is deleted, and you can enable it again the same way.')}`
+    }
+    if (!(await api.confirmDialog(t('Disable config file'), message))) return
   }
   togglingID = entry.id
   renderConfigFilesView()
   try {
-    const enabled = await api.toggleConfigFile(entry.path)
-    entry.enabled = enabled
+    entry.enabled = isTelemetry ? await api.toggleTelemetry() : await api.toggleConfigFile(entry.path)
   } catch (error) {
     showError(String(error))
   }
@@ -75,6 +83,7 @@ function renderShellRow(entry: ConfigFileEntry): string {
           ${!entry.toggleable ? `<span class="config-badge config-badge-readonly">${t('View only')}</span>` : ''}
         </div>
         <p class="config-row-desc">${escapeHTML(entry.description)}</p>
+        ${entry.detected_value ? `<p class="config-row-value"><code>${escapeHTML(entry.detected_value)}</code></p>` : ''}
       </div>
       ${entry.toggleable
         ? `<label class="toggle-switch" title="${busy ? t('Working…') : entry.enabled ? t('Disable') : t('Enable')}">
@@ -82,21 +91,6 @@ function renderShellRow(entry: ConfigFileEntry): string {
             <span class="toggle-switch-track"><span class="toggle-switch-thumb"></span></span>
           </label>`
         : ''}
-    </div>`
-}
-
-function renderReadOnlyRow(entry: ConfigFileEntry): string {
-  return `
-    <div class="config-row config-row-readonly">
-      <div class="config-row-main">
-        <div class="config-row-title">
-          <code class="config-row-name">${escapeHTML(entry.name)}</code>
-          <span class="config-badge ${entry.exists ? 'config-badge-on' : 'config-badge-off'}">${entry.exists ? t('Found') : t('Not found')}</span>
-          <span class="config-badge config-badge-readonly">${t('View only')}</span>
-        </div>
-        <p class="config-row-desc">${escapeHTML(entry.description)}</p>
-        ${entry.detected_value ? `<p class="config-row-value"><code>${escapeHTML(entry.detected_value)}</code></p>` : ''}
-      </div>
     </div>`
 }
 
@@ -146,8 +140,8 @@ export function renderConfigFilesView(): void {
     ${!loading && filtered.length === 0 ? `<div class="empty compact">${t('No config files matched.')}</div>` : ''}
     ${renderSection(t('Shell-sourced files'), t('Files your shell startup files (.zshrc, .bashrc, ...) source in — only ones that are safe to switch off (guarded against a missing file, and not committed to git) get a button.'), shell, renderShellRow)}
     ${renderCollapsibleSection(t('Other dotfiles in your home folder'), t('Everything else starting with "." directly in your home folder (e.g. a stray ~/.env), plus files inside ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.azure, ~/.m2, ~/.terraform.d, and each ~/.config subfolder. Not tied to any shell startup file, so Thaloca only knows renaming it won\'t touch git history. Collapsed by default since some of these can be sensitive.'), home, renderShellRow)}
-    ${renderSection(t('Dev tools'), t('Global config files for tools on this machine, shown for visibility only. Most mix login/identity with other settings, so Thaloca never renames or edits them.'), tool, renderReadOnlyRow)}
-    ${renderSection(t('Telemetry'), t('Read-only inventory of telemetry-related settings Thaloca can safely detect. These aren’t edited here — change them yourself in the source tool if you want a different value.'), telemetry, renderReadOnlyRow)}
+    ${renderSection(t('Dev tools'), t('Global config files for tools on this machine. Most mix login/identity with other settings — read each one\'s description before switching it off, since disabling it can log you out or change how that tool behaves until you re-enable it.'), tool, renderShellRow)}
+    ${renderSection(t('Telemetry'), t('Claude Code telemetry-related settings, read from and written to this file\'s "env" block. The same variables can also be set as real shell environment variables, which Thaloca can\'t see or override.'), telemetry, renderShellRow)}
   `
 
   document.getElementById('config-filter')?.addEventListener('input', event => {

@@ -5,6 +5,7 @@ import {
   type Job, type OverviewResult, type TimelineEvent, type ResourceSnapshot, type ToolsSnapshot,
   type ServerConnection, type ServerHealth, type RemoteContainer, type InstalledApp, type ResourceSample,
   type SecurityReport, type SSHConfigHost, type RemoteFile, type BrewSearchResult, type BrewPackages, type RegistryPackage,
+  type ContainerRuntimeStatus,
 } from './api'
 import { escapeHTML, formatBytes, formatDuration, formatDate, getStatusClass, getSourceBadgeClass, matchesSearch, showLoading, showError, startGlobalLoading, stopGlobalLoading, hideSplashScreen } from './dom'
 import { applyStoredTheme, getTheme, setTheme } from './theme'
@@ -24,7 +25,7 @@ import { openServerTerminal, closeServerTerminal, reattachServerTerminal, type S
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import {
   renderServicesView, renderPortsView, renderJobsView, toggleProjectExpanded, expandProject,
-  checkAllHealth as checkAllHealthRuntime,
+  checkAllHealth as checkAllHealthRuntime, renderRuntimeEngineCard,
 } from './views/runtime'
 import { renderTimelineView, TIMELINE_NAVIGATE_EVENT, type TimelineRow } from './views/timeline'
 import {
@@ -50,6 +51,11 @@ let services: Service[] = []
 let ports: PortUsage[] = []
 let jobs: Job[] = []
 let dockerStatus = ''
+let containerRuntimeStatus: ContainerRuntimeStatus | null = null
+// Which engine kind (if any) currently has a Start/Stop/Install RPC in
+// flight — disables that row's button so a slow VM start can't be
+// double-clicked into two overlapping start attempts.
+let engineActionBusy = ''
 let activity: ActivitySummary | null = null
 let overview: OverviewResult | null = null
 let resources: ResourceSnapshot | null = null
@@ -191,12 +197,6 @@ function renderApp() {
             </svg>
             <span>${t('Security')}</span>
           </button>
-          <button class="nav-btn" data-view="config-files">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 21V4a1 1 0 0 1 1-1h8l6 6v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M13 3v6h6"/>
-            </svg>
-            <span>${t('Config Files')}</span>
-          </button>
         </nav>
         <div class="local-status">
           <div class="pulse"></div>
@@ -239,6 +239,7 @@ function renderApp() {
 
         <section id="runtime-view" class="view">
           <p class="subview-desc" id="runtime-summary">—</p>
+          <div id="runtime-engine-card"></div>
           <nav class="subtabs" id="services-subtabs">
             <button class="subtab active" data-subtab="docker">${t('Containers')} <span class="subtab-count" id="count-docker"></span></button>
             <button class="subtab" data-subtab="processes">${t('Processes')} <span class="subtab-count" id="count-processes"></span></button>
@@ -335,6 +336,7 @@ function renderApp() {
             <button class="subtab" data-tools-subtab="packages">${t('Packages')}</button>
             <button class="subtab" data-tools-subtab="utilities">${t('Utilities')}</button>
             <button class="subtab" data-tools-subtab="env">${t('Env Files')}</button>
+            <button class="subtab" data-tools-subtab="config-files">${t('Config Files')}</button>
           </nav>
           <div id="subview-tools-detected" class="subview active">
             <p class="subview-desc">${t("Detects installed package-manager/CLI tools and their versions, and flags discovered projects whose own manifest (package.json, go.mod, Cargo.toml, ...) needs a tool that isn't installed. Install/Update run through Homebrew and always ask for confirmation first.")}</p>
@@ -353,6 +355,9 @@ function renderApp() {
             <p class="subview-desc">${t('Which env KEYS each discovered project\'s .env defines — values are hidden by default and only fetched one at a time when you click "Show value", never loaded or cached up front.')}</p>
             <div id="env-files-content"></div>
           </div>
+          <div id="subview-tools-config-files" class="subview">
+            <div id="config-files-content"></div>
+          </div>
         </section>
 
         <section id="servers-view" class="view">
@@ -369,10 +374,6 @@ function renderApp() {
           <div id="security-content"></div>
         </section>
 
-        <section id="config-files-view" class="view">
-          <div id="config-files-content"></div>
-        </section>
-
       </main>
       <aside id="inspector-panel" class="inspector-panel"></aside>
     </div>
@@ -385,7 +386,7 @@ function switchView(view: string) {
   document.querySelectorAll('.nav-btn, .view').forEach(el => el.classList.remove('active'))
   document.querySelector(`.nav-btn[data-view="${view}"]`)?.classList.add('active')
   document.getElementById(`${view}-view`)?.classList.add('active')
-  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), activity: t('Activity'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security'), 'config-files': t('Config Files') }
+  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), activity: t('Activity'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security') }
   document.getElementById('view-title')!.textContent = titles[view] || view
   closeServiceInspector()
 
@@ -424,11 +425,6 @@ function switchView(view: string) {
     stopLogsPolling()
   }
 
-  // Same lazy-load-once pattern as Env Files: scan on first visit, manual
-  // Refresh button for after changing something on disk.
-  if (view === 'config-files') {
-    initConfigFilesView()
-  }
 }
 
 // Re-translates the app-shell chrome built once in renderApp() (nav labels,
@@ -459,7 +455,7 @@ function applyLocaleToShell(): void {
   const navLabels: Record<string, string> = {
     overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), activity: t('Activity'),
     resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'),
-    security: t('Security'), 'config-files': t('Config Files'),
+    security: t('Security'),
   }
   Object.entries(navLabels).forEach(([view, label]) => setText(`.nav-btn[data-view="${view}"] span`, label))
 
@@ -519,6 +515,7 @@ function applyLocaleToShell(): void {
   setText('#tools-subtabs .subtab[data-tools-subtab="packages"]', t('Packages'))
   setText('#tools-subtabs .subtab[data-tools-subtab="utilities"]', t('Utilities'))
   setText('#tools-subtabs .subtab[data-tools-subtab="env"]', t('Env Files'))
+  setText('#tools-subtabs .subtab[data-tools-subtab="config-files"]', t('Config Files'))
   setText('#subview-tools-detected > .subview-desc', t("Detects installed package-manager/CLI tools and their versions, and flags discovered projects whose own manifest (package.json, go.mod, Cargo.toml, ...) needs a tool that isn't installed. Install/Update run through Homebrew and always ask for confirmation first."))
   setText('#subview-tools-packages > .subview-desc', t('Search any Homebrew formula or cask by name and install it, or uninstall anything already on this machine. Always asks for confirmation and shows the exact command first.'))
   setText('#subview-tools-utilities > .subview-desc', t('Small local dev utilities — generators, encoders, format converters. Runs entirely in the app, nothing leaves this machine.'))
@@ -583,6 +580,20 @@ async function handleQuitApp(bundleId: string): Promise<void> {
     await api.quitInstalledApp(bundleId)
   } catch (error) {
     showError(`${t('Could not quit app:')} ${String(error)}`)
+    return
+  }
+  await loadResources()
+}
+
+async function handleDeleteApp(path: string, name: string): Promise<void> {
+  if (!(await api.confirmDialog(
+    t('Delete application'),
+    `${t('Delete')} ${name}? ${t('This moves it to the Trash (quitting it first if it\'s running) — nothing is permanently deleted, and you can restore it from the Trash if this was a mistake.')}`,
+  ))) return
+  try {
+    await api.deleteInstalledApp(path)
+  } catch (error) {
+    showError(`${t('Could not delete app:')} ${String(error)}`)
     return
   }
   await loadResources()
@@ -1464,8 +1475,9 @@ function bindEvents() {
     })
   })
 
-  // Sub-tabs inside Tools (Detected Tools / Utilities / Env Files) —
-  // Utilities and Env Files are both lazily initialized on first visit.
+  // Sub-tabs inside Tools (Detected Tools / Utilities / Env Files / Config
+  // Files) — Utilities, Env Files, and Config Files are all lazily
+  // initialized on first visit.
   document.querySelectorAll('#tools-subtabs .subtab').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#tools-subtabs .subtab, #tools-view .subview').forEach(el => el.classList.remove('active'))
@@ -1473,6 +1485,7 @@ function bindEvents() {
       document.getElementById(`subview-tools-${btn.getAttribute('data-tools-subtab')}`)!.classList.add('active')
       if (btn.getAttribute('data-tools-subtab') === 'utilities') initUtilitiesView()
       if (btn.getAttribute('data-tools-subtab') === 'env') initEnvFilesView()
+      if (btn.getAttribute('data-tools-subtab') === 'config-files') initConfigFilesView()
     })
   })
 
@@ -1550,13 +1563,74 @@ async function refreshRuntime(): Promise<void> {
   return loadRuntime()
 }
 
+async function loadContainerRuntimeStatus(): Promise<void> {
+  try {
+    containerRuntimeStatus = await api.getContainerRuntimeStatus()
+  } catch {
+    containerRuntimeStatus = null
+  }
+  renderEngineCard()
+}
+
+const engineNames: Record<string, string> = { 'docker-desktop': 'Docker Desktop', orbstack: 'OrbStack', colima: 'Colima' }
+
+async function handleEngineStart(kind: string): Promise<void> {
+  if (engineActionBusy) return
+  engineActionBusy = kind
+  renderEngineCard()
+  try {
+    await api.startContainerRuntime(kind)
+  } catch (error) {
+    showError(String(error))
+  }
+  engineActionBusy = ''
+  await loadContainerRuntimeStatus()
+  await refreshRuntime()
+}
+
+async function handleEngineStop(kind: string): Promise<void> {
+  if (engineActionBusy) return
+  const name = engineNames[kind] || kind
+  if (!(await api.confirmDialog(t('Stop container runtime'), `${t('Stop')} ${name}? ${t('Every container running in it will stop too.')}`))) return
+  engineActionBusy = kind
+  renderEngineCard()
+  try {
+    await api.stopContainerRuntime(kind)
+  } catch (error) {
+    showError(String(error))
+  }
+  engineActionBusy = ''
+  await loadContainerRuntimeStatus()
+  await refreshRuntime()
+}
+
+async function handleEngineInstall(): Promise<void> {
+  if (engineActionBusy) return
+  if (!(await api.confirmDialog(
+    t('Install Colima'),
+    t('This runs "brew install colima docker docker-compose docker-buildx" — Homebrew will download and install these on your Mac. This can take several minutes and a few hundred MB of disk space. Continue?'),
+  ))) return
+  engineActionBusy = 'colima'
+  renderEngineCard()
+  try {
+    await api.installColima()
+  } catch (error) {
+    showError(String(error))
+    engineActionBusy = ''
+    renderEngineCard()
+    return
+  }
+  engineActionBusy = ''
+  await loadContainerRuntimeStatus()
+}
+
 async function doLoadRuntime() {
   // One discovery pass (App.Snapshot) covers services/ports/jobs plus the
   // project grouping and anomaly detection Overview needs — previously
   // these were 4 separate bindings the frontend always called together,
   // with Overview redoing the same service/job discovery the other three
   // had just done.
-  const snapshot = await api.snapshot()
+  const [snapshot] = await Promise.all([api.snapshot(), loadContainerRuntimeStatus()])
   services = normalizeServices(snapshot.services)
   ports = normalizePorts(snapshot.ports)
   jobs = normalizeJobs(snapshot.jobs)
@@ -1596,7 +1670,12 @@ function rebuildCommandIndex(): void {
     { id: 'view:tools', label: `${t('Go to')} ${t('Tools')}`, kind: 'view', run: () => switchView('tools') },
     { id: 'view:servers', label: `${t('Go to')} ${t('Servers')}`, kind: 'view', run: () => switchView('servers') },
     { id: 'view:logs', label: `${t('Go to')} ${t('Logs')}`, kind: 'view', run: () => switchView('logs') },
-    { id: 'view:config-files', label: `${t('Go to')} ${t('Config Files')}`, kind: 'view', run: () => switchView('config-files') },
+    {
+      id: 'view:config-files', label: `${t('Go to')} ${t('Config Files')}`, kind: 'view', run: () => {
+        switchView('tools')
+        document.querySelector<HTMLButtonElement>('#tools-subtabs .subtab[data-tools-subtab="config-files"]')?.click()
+      },
+    },
   ]
   const serviceItems: CommandItem[] = services.map(s => ({
     id: `service:${s.id}`,
@@ -1667,7 +1746,7 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-history-window]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install]')
   if (!button) {
     // Activity dashboard: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -1873,6 +1952,11 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.deleteApp) {
+    await handleDeleteApp(button.dataset.deleteApp, button.dataset.deleteAppName || button.dataset.deleteApp)
+    return
+  }
+
   if (button.dataset.historyWindow) {
     handleHistoryWindowChange(button.dataset.historyWindow as HistoryWindow)
     return
@@ -2070,6 +2154,19 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.engineStart) {
+    await handleEngineStart(button.dataset.engineStart)
+    return
+  }
+  if (button.dataset.engineStop) {
+    await handleEngineStop(button.dataset.engineStop)
+    return
+  }
+  if (button.dataset.engineInstall) {
+    await handleEngineInstall()
+    return
+  }
+
   const path = button.dataset.ignoreRepo || button.dataset.trackRepo || button.dataset.enableEvents || button.dataset.disableEvents || ''
   if (!path) return
 
@@ -2262,6 +2359,9 @@ async function handleDocumentChange(event: Event) {
 // module's state — see that file's header comment).
 function renderServices(): void {
   renderServicesView({ services, ports, jobs, dockerStatus, searchQuery, healthCache, pendingContainers, jobLogs, projectLogs, processLogs, pendingProjects, imageScans: containerImageScans })
+}
+function renderEngineCard(): void {
+  renderRuntimeEngineCard(containerRuntimeStatus, engineActionBusy)
 }
 function renderPorts(): void {
   renderPortsView(ports, searchQuery)

@@ -245,6 +245,10 @@ const vi: Record<string, string> = {
   'Not found on PATH': 'Không tìm thấy trong PATH',
   'Managed by': 'Được quản lý bởi',
   'Install/Update not offered here to avoid a conflicting Homebrew copy.': 'Cài đặt/Cập nhật không khả dụng ở đây để tránh xung đột với bản Homebrew.',
+  'Requires Homebrew — install it from https://brew.sh, then refresh this tab.':
+    'Cần có Homebrew — cài đặt tại https://brew.sh, sau đó làm mới tab này.',
+  'Requires Go — install Go first (e.g. from https://go.dev/dl/), then refresh this tab.':
+    'Cần có Go — cài đặt Go trước (ví dụ tại https://go.dev/dl/), sau đó làm mới tab này.',
   'missing:': 'thiếu:',
   'requires:': 'yêu cầu:',
   Installing: 'Đang cài đặt',
@@ -266,8 +270,6 @@ const vi: Record<string, string> = {
   Disabled: 'Đã tắt',
   'View only': 'Chỉ xem',
   'Working…': 'Đang xử lý…',
-  Found: 'Đã tìm thấy',
-  'Not found': 'Không tìm thấy',
   'Filter config files...': 'Lọc tệp cấu hình...',
   'Scanning…': 'Đang quét…',
   'Scanning for config files…': 'Đang quét tệp cấu hình…',
@@ -281,11 +283,29 @@ const vi: Record<string, string> = {
   'Everything else starting with "." directly in your home folder (e.g. a stray ~/.env) — not tied to any shell startup file, so Thaloca only knows renaming it won\'t touch git history. Collapsed by default since some of these can be sensitive.':
     'Mọi thứ khác bắt đầu bằng "." nằm trực tiếp trong thư mục home của bạn (ví dụ một tệp ~/.env lạc) — không gắn với bất kỳ tệp khởi động shell nào, nên Thaloca chỉ biết rằng đổi tên nó sẽ không ảnh hưởng lịch sử git. Thu gọn theo mặc định vì một số tệp này có thể nhạy cảm.',
   'Dev tools': 'Công cụ phát triển',
-  'Global config files for tools on this machine, shown for visibility only. Most mix login/identity with other settings, so Thaloca never renames or edits them.':
-    'Tệp cấu hình toàn cục cho các công cụ trên máy này, chỉ hiển thị để tham khảo. Hầu hết trộn lẫn thông tin đăng nhập/danh tính với các cài đặt khác, nên Thaloca không bao giờ đổi tên hoặc chỉnh sửa chúng.',
+  'Global config files for tools on this machine. Most mix login/identity with other settings — read each one\'s description before switching it off, since disabling it can log you out or change how that tool behaves until you re-enable it.':
+    'Tệp cấu hình toàn cục cho các công cụ trên máy này. Hầu hết trộn lẫn thông tin đăng nhập/danh tính với các cài đặt khác — hãy đọc mô tả của từng tệp trước khi tắt, vì việc tắt có thể khiến bạn bị đăng xuất hoặc thay đổi cách công cụ đó hoạt động cho đến khi bạn bật lại.',
+  'Disabling this can affect login, auth, or settings for it until you re-enable it.':
+    'Việc tắt có thể ảnh hưởng đến đăng nhập, xác thực, hoặc cài đặt của nó cho đến khi bạn bật lại.',
   Telemetry: 'Telemetry',
-  'Read-only inventory of telemetry-related settings Thaloca can safely detect. These aren’t edited here — change them yourself in the source tool if you want a different value.':
-    'Danh sách chỉ đọc các cài đặt liên quan đến telemetry mà Thaloca có thể phát hiện an toàn. Các mục này không được chỉnh sửa ở đây — hãy tự thay đổi giá trị trong công cụ gốc nếu muốn.',
+  'Claude Code telemetry-related settings, read from and written to this file\'s "env" block. The same variables can also be set as real shell environment variables, which Thaloca can\'t see or override.':
+    'Các cài đặt liên quan đến telemetry của Claude Code, được đọc và ghi vào khối "env" của tệp này. Các biến này cũng có thể được đặt dưới dạng biến môi trường shell thật, mà Thaloca không thể thấy hoặc ghi đè.',
+  'Disable Claude Code telemetry': 'Tắt telemetry của Claude Code',
+  'This writes DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, and DISABLE_NON_ESSENTIAL_MODEL_CALLS (all "true") plus CLAUDE_CODE_ENABLE_TELEMETRY ("false") into this file\'s "env" block — re-enabling removes all four again. If any of these are also set as real shell environment variables, those can still override this.':
+    'Việc này sẽ ghi DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, và DISABLE_NON_ESSENTIAL_MODEL_CALLS (đều thành "true") cùng với CLAUDE_CODE_ENABLE_TELEMETRY ("false") vào khối "env" của tệp này — bật lại sẽ xóa cả 4 biến này. Nếu bất kỳ biến nào trong số này cũng được đặt dưới dạng biến môi trường shell thật, chúng vẫn có thể ghi đè lên cài đặt này.',
+
+  // Container Runtime (Runtime view engine card)
+  'Container Runtime': 'Container Runtime',
+  Running: 'Đang chạy',
+  Stopped: 'Đã dừng',
+  'Install Colima': 'Cài đặt Colima',
+  'Install Homebrew first': 'Cần cài Homebrew trước',
+  'More than one container engine is running at once — they fight over the same Docker socket, so one of them may silently not be the one actually in effect. Stop all but one.':
+    'Có nhiều hơn một container engine đang chạy cùng lúc — chúng tranh nhau cùng một Docker socket, nên một trong số đó có thể âm thầm không phải là cái đang thực sự hoạt động. Hãy dừng bớt, chỉ giữ lại một cái.',
+  'Stop container runtime': 'Dừng container runtime',
+  'Every container running in it will stop too.': 'Mọi container đang chạy trong đó cũng sẽ dừng theo.',
+  'This runs "brew install colima docker docker-compose docker-buildx" — Homebrew will download and install these on your Mac. This can take several minutes and a few hundred MB of disk space. Continue?':
+    'Việc này sẽ chạy "brew install colima docker docker-compose docker-buildx" — Homebrew sẽ tải và cài các gói này lên máy bạn. Có thể mất vài phút và vài trăm MB dung lượng ổ đĩa. Tiếp tục?',
 
   // Env Files
   'Copy .env file': 'Sao chép tệp .env',
@@ -380,6 +400,10 @@ const vi: Record<string, string> = {
   'Could not quit app:': 'Không thể thoát ứng dụng:',
   'Quit application': 'Thoát ứng dụng',
   'Quit this application? Any unsaved work in it will be lost.': 'Thoát ứng dụng này? Mọi thay đổi chưa lưu sẽ bị mất.',
+  'Could not delete app:': 'Không thể xóa ứng dụng:',
+  'Delete application': 'Xóa ứng dụng',
+  'This moves it to the Trash (quitting it first if it\'s running) — nothing is permanently deleted, and you can restore it from the Trash if this was a mistake.':
+    'Việc này sẽ chuyển vào Thùng rác (thoát ứng dụng trước nếu đang chạy) — không có gì bị xóa vĩnh viễn, bạn có thể khôi phục từ Thùng rác nếu nhầm.',
   'is still running — wait for it to finish first.': 'vẫn đang chạy — vui lòng đợi hoàn tất.',
   Cancel: 'Hủy',
   'Add server': 'Thêm máy chủ',

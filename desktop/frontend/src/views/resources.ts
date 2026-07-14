@@ -75,8 +75,12 @@ function renderAppsList(apps: InstalledApp[], searchQuery: string): string {
 }
 
 function renderAppRow(app: InstalledApp): string {
+  const icon = app.icon
+    ? `<img src="${app.icon}" alt="" style="width:20px;height:20px;border-radius:4px;flex-shrink:0;">`
+    : `<span style="width:20px;height:20px;border-radius:4px;flex-shrink:0;background:var(--bg-elevated);display:inline-block;"></span>`
   return `
     <div class="resource-row">
+      ${icon}
       <span class="resource-row-label" title="${escapeHTML(app.path)}">${escapeHTML(app.name)}</span>
       <span class="resource-row-detail muted">${escapeHTML(app.version || '—')}</span>
       ${app.running
@@ -86,6 +90,7 @@ function renderAppRow(app: InstalledApp): string {
         ${app.running
           ? `<button class="repo-action danger" data-quit-app="${escapeHTML(app.bundle_id)}">Quit</button>`
           : `<button class="repo-action" data-open-app="${escapeHTML(app.path)}">Open</button>`}
+        <button class="repo-action danger" data-delete-app="${escapeHTML(app.path)}" data-delete-app-name="${escapeHTML(app.name)}">Delete</button>
       </span>
     </div>`
 }
@@ -110,7 +115,15 @@ function renderProcessTable(processes: ProcessInfo[], searchQuery: string, sort:
   if (!filtered.length) {
     return `<div class="empty compact">${processes.length ? 'No processes match your search.' : 'No process info available.'}</div>`
   }
+  // While actively searching, sort by PID — a value that never changes
+  // between polls — instead of live CPU/Mem: otherwise a row can swap
+  // position with its neighbor mid-click as CPU/Mem fluctuate on every
+  // refresh, same class of misclick bug already fixed for the Apps list
+  // above (see renderAppsList's comment). Only kicks in while filtering to
+  // a specific process; the sortable CPU/Mem/PID columns still work as
+  // normal otherwise.
   const sorted = [...filtered].sort((a, b) => {
+    if (searchQuery) return a.pid - b.pid
     const dir = sort.dir === 'asc' ? 1 : -1
     if (sort.by === 'pid') return (a.pid - b.pid) * dir
     if (sort.by === 'mem') return (a.mem_percent - b.mem_percent) * dir

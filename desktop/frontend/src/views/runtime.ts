@@ -7,7 +7,7 @@
 // listeners for those, since they work regardless of which module rendered
 // the markup.
 import { api, normalizeServices, normalizeJobs, normalizePorts } from '../api'
-import type { Service, PortUsage, Job, HealthStatus, SecurityReport } from '../api'
+import type { Service, PortUsage, Job, HealthStatus, SecurityReport, ContainerRuntimeStatus } from '../api'
 import { escapeHTML, getSourceBadgeClass, matchesSearch } from '../dom'
 import { groupFindings, renderFindingGroup, renderScannerStatusRow } from './security'
 import { t } from '../i18n'
@@ -72,6 +72,68 @@ export function renderServicesView(ctx: RuntimeContext): void {
   processList.innerHTML = processServices.length
     ? `<section class="project-group expanded">${processServices.map(svc => renderProcessRow(svc, ctx)).join('')}</section>`
     : `<div class="empty compact">${processAll.length ? t('No processes match the current search.') : t('No local processes are listening on TCP ports.')}</div>`
+}
+
+// Where to send someone to download an engine Thaloca can't install itself
+// (closed-source — see the "else" branch below for why only Colima gets a
+// real Install button).
+const ENGINE_DOWNLOAD_URL: Record<string, string> = {
+  'docker-desktop': 'https://www.docker.com/products/docker-desktop/',
+  orbstack: 'https://orbstack.dev/download',
+}
+
+// One row per known engine (Docker Desktop, OrbStack, Colima) — Installed
+// but not running gets a Start button, running gets a Stop button, and
+// Colima specifically gets an "Install" button when it isn't installed at
+// all (the only engine Thaloca offers to install itself; see
+// desktop/containerRuntime.go's InstallColima for why). Docker
+// Desktop/OrbStack are closed-source, so Thaloca can't install those
+// itself either — they get a "Download" button that just opens the
+// vendor's own download page instead. Click handling lives in main.ts's
+// shared delegated handler, same as the rest of this view —
+// data-engine-start/-stop/-install carry which engine; data-open-external
+// (Download) is already generic, handled the same way everywhere else in
+// the app.
+export function renderRuntimeEngineCard(status: ContainerRuntimeStatus | null, busyKind: string): void {
+  const el = document.getElementById('runtime-engine-card')
+  if (!el || !status) { if (el) el.innerHTML = ''; return }
+
+  const rows = status.engines.map(engine => {
+    const busy = busyKind === engine.kind
+    let action = ''
+    if (busy) {
+      action = `<span class="muted">${t('Working…')}</span>`
+    } else if (engine.running) {
+      action = `<button class="repo-action danger" data-engine-stop="${escapeHTML(engine.kind)}">${t('Stop')}</button>`
+    } else if (engine.installed) {
+      action = `<button class="repo-action" data-engine-start="${escapeHTML(engine.kind)}">${t('Start')}</button>`
+    } else if (engine.kind === 'colima') {
+      action = status.homebrew_available
+        ? `<button class="repo-action" data-engine-install="colima">${t('Install Colima')}</button>`
+        : `<span class="muted">${t('Install Homebrew first')}</span>`
+    } else if (ENGINE_DOWNLOAD_URL[engine.kind]) {
+      action = `<button class="repo-action" data-open-external="${escapeHTML(ENGINE_DOWNLOAD_URL[engine.kind])}">${t('Download')}</button>`
+    } else {
+      action = `<span class="muted">${t('Not installed')}</span>`
+    }
+    return `
+      <div class="config-row">
+        <div class="config-row-main">
+          <div class="config-row-title">
+            <code class="config-row-name">${escapeHTML(engine.name)}</code>
+            <span class="config-badge ${engine.running ? 'config-badge-on' : 'config-badge-off'}">${engine.running ? t('Running') : engine.installed ? t('Stopped') : t('Not installed')}</span>
+          </div>
+        </div>
+        ${action}
+      </div>`
+  }).join('')
+
+  el.innerHTML = `
+    <div class="config-section">
+      <div class="config-section-title">${t('Container Runtime')}</div>
+      ${status.multiple_running ? `<p class="subview-desc tool-action-failed">${t('More than one container engine is running at once — they fight over the same Docker socket, so one of them may silently not be the one actually in effect. Stop all but one.')}</p>` : ''}
+      <div class="config-section-rows">${rows}</div>
+    </div>`
 }
 
 function renderDockerProjects(dockerServices: Service[], totalContainers: number, ctx: RuntimeContext): void {
