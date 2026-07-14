@@ -3505,6 +3505,7 @@ select.search-input {
   width: 100%;
   color: var(--fg);
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
   text-align: left;
 }

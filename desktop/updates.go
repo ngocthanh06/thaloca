@@ -13,7 +13,7 @@ import (
 // desktop/frontend/package.json's "version") together when cutting a
 // release. There's no build-time version-injection set up, so it's a
 // plain constant kept in sync by hand.
-const AppVersion = "0.1.2"
+const AppVersion = "0.1.3"
 
 // updateRepo is the GitHub repo releases are checked against. Hardcoded
 // like the embedded GitHub OAuth client ID elsewhere in this app — it's
