@@ -204,7 +204,7 @@ func (c *Checker) checkTLS(ctx context.Context, target string, result CheckResul
 	// target format: host:port, optionally prefixed with the "tls://" scheme
 	// detectType recognizes.
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", strings.TrimPrefix(target, "tls://"), &tls.Config{})
+	conn, err := tls.DialWithDialer(dialer, "tcp", strings.TrimPrefix(target, "tls://"), &tls.Config{MinVersion: tls.VersionTLS12})
 	latency := time.Since(start).Nanoseconds()
 	result.Latency = latency
 

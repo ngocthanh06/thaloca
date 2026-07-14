@@ -29,7 +29,23 @@ let currentActivity: ActivitySummary | null = null
 // threaded through as a parameter.
 export function renderSourceView(activity: ActivitySummary | null): void {
   currentActivity = activity
+  ensureVSCodeChecked()
   renderSource()
+}
+
+// Detected once per session (cheap — a single exec.LookPath on the Go
+// side — but no reason to repeat it on every render) so the "Open in VS
+// Code" button can be hidden entirely on machines without it, instead of
+// showing an action that would just fail.
+let hasVSCode: boolean | null = null
+let vsCodeCheckStarted = false
+function ensureVSCodeChecked(): void {
+  if (vsCodeCheckStarted) return
+  vsCodeCheckStarted = true
+  void api.hasVSCode().then(result => {
+    hasVSCode = result
+    renderSource()
+  }).catch(() => { hasVSCode = false })
 }
 
 export function setSourceFilter(value: string): void {
@@ -42,7 +58,17 @@ export function setSourceFilter(value: string): void {
 // Overview/Activity, and a Git timeline row click).
 export async function openRepoInSourceControl(path: string): Promise<void> {
   selectedRepoPath = path
-  if (!repoDetails.has(path)) repoDetails.set(path, { tab: 'changes', dir: '', loading: false })
+  const isNew = !repoDetails.has(path)
+  if (isNew) repoDetails.set(path, { tab: 'changes', dir: '', loading: false })
+  if (isNew) {
+    // Fetched once per repo (not per tab visit, unlike GitHubStatus on the
+    // PRs tab) since the header shows it regardless of which tab is
+    // active — cheap, a local remote-URL read, no network/auth involved.
+    void api.repoGitHubOwner(path).then(owner => {
+      const detail = repoDetails.get(path)
+      if (detail) { detail.githubOwner = owner; renderSource() }
+    })
+  }
   await loadRepoTab(path, repoDetails.get(path)!.tab)
 }
 
@@ -70,6 +96,10 @@ interface RepoDetail {
   fileContent?: string
   fileMaximized?: boolean
   gh?: GitHubStatus
+  // Org/user that owns this repo's origin remote (from RepoGitHubOwner) —
+  // distinct from the repo.identity shown next to it, which is just which
+  // local git identity this machine commits here as.
+  githubOwner?: string
   prs?: PullRequest[]
   pr?: PullRequestDetail
   prFilter?: PullRequestFilter
@@ -1687,14 +1717,17 @@ function renderSource() {
     return
   }
   const path = escapeHTML(repo.path)
-  const stashes = repoDetails.get(repo.path)?.stashes || []
+  const repoDetail = repoDetails.get(repo.path)
+  const stashes = repoDetail?.stashes || []
   detailEl.innerHTML = `
     <div class="sync-toolbar">
       <div class="sync-repo">
         <strong>${escapeHTML(repo.name)}</strong>
-        <small>${escapeHTML(repo.branch || '')}${repo.ahead ? ` · ↑${repo.ahead}` : ''}${repo.behind ? ` · ↓${repo.behind}` : ''}</small>
+        <small>${escapeHTML(repo.branch || '')}${repo.ahead ? ` · ↑${repo.ahead}` : ''}${repo.behind ? ` · ↓${repo.behind}` : ''}${repo.identity ? ` · Committing as ${escapeHTML(repo.identity)}` : ''}${repoDetail?.githubOwner ? ` · GitHub: ${escapeHTML(repoDetail.githubOwner)}` : ''}</small>
       </div>
       <span class="sync-actions">
+        <button class="repo-action" data-open-folder="${path}" title="Open folder in Finder">Open Folder</button>
+        ${hasVSCode ? `<button class="repo-action" data-open-vscode="${path}" title="Open in VS Code">VS Code</button>` : ''}
         <button class="repo-action" data-sync="fetch" data-repo="${path}">Fetch</button>
         <button class="repo-action" data-sync="pull" data-repo="${path}">Pull${repo.behind ? ` (${repo.behind})` : ''}</button>
         <button class="repo-action" data-sync="push" data-repo="${path}">Push${repo.ahead ? ` (${repo.ahead})` : ''}</button>

@@ -142,8 +142,9 @@ export interface EnvFileSummary {
 // One container engine (Docker Desktop, OrbStack, or Colima) as reported
 // by GetContainerRuntimeStatus — see desktop/containerRuntime.go.
 export interface RuntimeEngineStatus {
-  kind: 'docker-desktop' | 'orbstack' | 'colima'
+  kind: string
   name: string
+  download_url?: string
   installed: boolean
   running: boolean
 }
@@ -865,6 +866,8 @@ interface WailsApp {
   RunSecurityScanAll(paths: string[]): Promise<Partial<SecurityReport>[]>
   OpenFileAtLine(root: string, file: string, line: number): Promise<void>
   RevealFileInFinder(root: string, file: string): Promise<void>
+  OpenPathInFinder(path: string): Promise<void>
+  HasVSCode(): Promise<boolean>
   ScanContainerImage(image: string): Promise<Partial<SecurityReport>>
   GetTerminalHistory(serverId: string): Promise<string[]>
   AppendTerminalHistory(serverId: string, command: string): Promise<void>
@@ -931,6 +934,7 @@ interface WailsApp {
   CommitChanges(path: string, message: string): Promise<void>
   ResolveConflict(path: string, file: string, strategy: string): Promise<void>
   GitHubStatus(path: string): Promise<GitHubStatus>
+  RepoGitHubOwner(path: string): Promise<string>
   ListPullRequests(path: string, filter: PullRequestFilter): Promise<PullRequest[]>
   CountPullRequests(path: string, filter: PullRequestFilter): Promise<PullRequestCounts>
   ListPullRequestAuthors(path: string): Promise<string[]>
@@ -1178,6 +1182,11 @@ export const api = {
     const fn = wailsApp()?.RevealFileInFinder
     return fn ? fn(root, file) : Promise.reject(new Error('Wails runtime not available'))
   },
+  openPathInFinder: (path: string): Promise<void> => {
+    const fn = wailsApp()?.OpenPathInFinder
+    return fn ? fn(path) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  hasVSCode: (): Promise<boolean> => wailsApp()?.HasVSCode?.() || Promise.resolve(false),
   scanContainerImage: (image: string): Promise<SecurityReport> => {
     const fn = wailsApp()?.ScanContainerImage
     return fn ? fn(image).then(normalizeSecurityReport) : Promise.reject(new Error('Wails runtime not available'))
@@ -1286,6 +1295,7 @@ export const api = {
   commitChanges: (path: string, message: string) => wailsApp()?.CommitChanges?.(path, message) || Promise.resolve(),
   resolveConflict: (path: string, file: string, strategy: string) => wailsApp()?.ResolveConflict?.(path, file, strategy) || Promise.resolve(),
   githubStatus: (path: string): Promise<GitHubStatus> => wailsApp()?.GitHubStatus?.(path) || Promise.resolve({ configured: false, authenticated: false, message: 'native not available' }),
+  repoGitHubOwner: (path: string): Promise<string> => wailsApp()?.RepoGitHubOwner?.(path) || Promise.resolve(''),
   listPullRequests: (path: string, filter: PullRequestFilter): Promise<PullRequest[]> => wailsApp()?.ListPullRequests?.(path, filter) || Promise.resolve([]),
   countPullRequests: (path: string, filter: PullRequestFilter): Promise<PullRequestCounts> => wailsApp()?.CountPullRequests?.(path, filter) || Promise.resolve({ open: 0, closed: 0, merged: 0 }),
   listPullRequestAuthors: (path: string): Promise<string[]> => wailsApp()?.ListPullRequestAuthors?.(path) || Promise.resolve([]),

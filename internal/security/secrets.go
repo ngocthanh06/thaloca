@@ -129,6 +129,16 @@ func scanSecretsNative(root string) ([]Finding, error) {
 			}
 			return nil
 		}
+		// A symlink's own DirEntry reports the tiny size of the link
+		// itself, not its target's — so the maxScannedFileSize check below
+		// would pass trivially while os.ReadFile still follows the link
+		// and reads whatever it points to. A repo being scanned isn't
+		// necessarily trusted (a coworker's branch, a cloned dependency),
+		// so a symlink there could point outside the repo entirely (e.g.
+		// at ~/.ssh/id_rsa). Skip symlinks outright rather than follow them.
+		if !d.Type().IsRegular() {
+			return nil
+		}
 		info, err := d.Info()
 		if err != nil || info.Size() == 0 || info.Size() > maxScannedFileSize {
 			return nil

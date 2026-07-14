@@ -75,8 +75,9 @@ function renderAppsList(apps: InstalledApp[], searchQuery: string): string {
 }
 
 function renderAppRow(app: InstalledApp): string {
-  const icon = app.icon
-    ? `<img src="${app.icon}" alt="" style="width:20px;height:20px;border-radius:4px;flex-shrink:0;">`
+  const safeIcon = app.icon?.startsWith('data:image/png;base64,') ? app.icon : ''
+  const icon = safeIcon
+    ? `<img src="${escapeHTML(safeIcon)}" alt="" style="width:20px;height:20px;border-radius:4px;flex-shrink:0;">`
     : `<span style="width:20px;height:20px;border-radius:4px;flex-shrink:0;background:var(--bg-elevated);display:inline-block;"></span>`
   return `
     <div class="resource-row">

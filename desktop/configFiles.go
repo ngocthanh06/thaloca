@@ -552,7 +552,11 @@ func (a *App) ToggleConfigFile(path string) (bool, error) {
 		if match.Category != "tool" {
 			return false, err
 		}
-		if err := os.WriteFile(match.Path, nil, 0o644); err != nil {
+		file, err := os.OpenFile(match.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return false, err
+		}
+		if err := file.Close(); err != nil {
 			return false, err
 		}
 		return true, nil

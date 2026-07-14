@@ -52,6 +52,7 @@ let ports: PortUsage[] = []
 let jobs: Job[] = []
 let dockerStatus = ''
 let containerRuntimeStatus: ContainerRuntimeStatus | null = null
+let containerRuntimeStatusInFlight: Promise<void> | null = null
 // Which engine kind (if any) currently has a Start/Stop/Install RPC in
 // flight — disables that row's button so a slow VM start can't be
 // double-clicked into two overlapping start attempts.
@@ -99,6 +100,10 @@ const jobLogs = new Map<string, string>()
 const projectLogs = new Map<string, string>()
 // pid (string) → best-effort tailed log file content for a local process
 const processLogs = new Map<string, string>()
+// PIDs with a Stop RPC in flight. The set guards against a freshly-rendered
+// replacement button sending the same request while the backend waits for
+// the process's graceful-exit window.
+const pendingProcessStops = new Set<number>()
 // container id → starting | stopping | restarting (UI pending state)
 const pendingContainers = new Map<string, string>()
 // project name → starting | stopping | restarting | removing (UI pending
@@ -402,6 +407,8 @@ function switchView(view: string) {
     window.clearInterval(resourcesTimer)
     resourcesTimer = null
   }
+
+  if (view === 'runtime') void loadContainerRuntimeStatus()
 
   // Tools & Packages is detection-only (no live values to poll) — load once
   // per visit, with a manual Refresh button for after installing something.
@@ -1563,16 +1570,19 @@ async function refreshRuntime(): Promise<void> {
   return loadRuntime()
 }
 
-async function loadContainerRuntimeStatus(): Promise<void> {
-  try {
-    containerRuntimeStatus = await api.getContainerRuntimeStatus()
-  } catch {
-    containerRuntimeStatus = null
+function loadContainerRuntimeStatus(): Promise<void> {
+  if (!containerRuntimeStatusInFlight) {
+    containerRuntimeStatusInFlight = (async () => {
+      try {
+        containerRuntimeStatus = await api.getContainerRuntimeStatus()
+      } catch {
+        containerRuntimeStatus = null
+      }
+      renderEngineCard()
+    })().finally(() => { containerRuntimeStatusInFlight = null })
   }
-  renderEngineCard()
+  return containerRuntimeStatusInFlight
 }
-
-const engineNames: Record<string, string> = { 'docker-desktop': 'Docker Desktop', orbstack: 'OrbStack', colima: 'Colima' }
 
 async function handleEngineStart(kind: string): Promise<void> {
   if (engineActionBusy) return
@@ -1584,13 +1594,12 @@ async function handleEngineStart(kind: string): Promise<void> {
     showError(String(error))
   }
   engineActionBusy = ''
-  await loadContainerRuntimeStatus()
   await refreshRuntime()
 }
 
 async function handleEngineStop(kind: string): Promise<void> {
   if (engineActionBusy) return
-  const name = engineNames[kind] || kind
+  const name = containerRuntimeStatus?.engines.find(engine => engine.kind === kind)?.name || kind
   if (!(await api.confirmDialog(t('Stop container runtime'), `${t('Stop')} ${name}? ${t('Every container running in it will stop too.')}`))) return
   engineActionBusy = kind
   renderEngineCard()
@@ -1600,7 +1609,6 @@ async function handleEngineStop(kind: string): Promise<void> {
     showError(String(error))
   }
   engineActionBusy = ''
-  await loadContainerRuntimeStatus()
   await refreshRuntime()
 }
 
@@ -1630,7 +1638,8 @@ async function doLoadRuntime() {
   // these were 4 separate bindings the frontend always called together,
   // with Overview redoing the same service/job discovery the other three
   // had just done.
-  const [snapshot] = await Promise.all([api.snapshot(), loadContainerRuntimeStatus()])
+  const runtimeVisible = document.getElementById('runtime-view')?.classList.contains('active') ?? false
+  const [snapshot] = await Promise.all([api.snapshot(), runtimeVisible ? loadContainerRuntimeStatus() : Promise.resolve()])
   services = normalizeServices(snapshot.services)
   ports = normalizePorts(snapshot.ports)
   jobs = normalizeJobs(snapshot.jobs)
@@ -1746,7 +1755,7 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode]')
   if (!button) {
     // Activity dashboard: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -2092,6 +2101,24 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.openFolder !== undefined) {
+    try {
+      await api.openPathInFinder(button.dataset.openFolder)
+    } catch (error) {
+      showError(String(error))
+    }
+    return
+  }
+
+  if (button.dataset.openVscode !== undefined) {
+    try {
+      await api.openFileAtLine(button.dataset.openVscode, '', 0)
+    } catch (error) {
+      showError(String(error))
+    }
+    return
+  }
+
   if (button.dataset.branchCreate || button.dataset.branchSwitch || button.dataset.branchMerge || button.dataset.branchDelete) {
     await handleBranchAction(button)
     return
@@ -2282,6 +2309,8 @@ async function handleProjectAction(button: HTMLButtonElement) {
 
 async function handleContainerOrProcessAction(button: HTMLButtonElement) {
   const containerID = button.dataset.startContainer || button.dataset.restartContainer || button.dataset.stopContainer || ''
+  const processFromResources = Boolean(button.closest('#resources-content'))
+  let processPID = 0
   try {
     if (button.dataset.startContainer) {
       pendingContainers.set(containerID, 'starting')
@@ -2298,8 +2327,17 @@ async function handleContainerOrProcessAction(button: HTMLButtonElement) {
       renderServices()
       await api.stopContainer(containerID)
     } else {
-      if (!(await api.confirmDialog(t('Stop process'), t('Stop this process?')))) return
-      await api.stopProcess(Number(button.dataset.stopPid || 0))
+      processPID = Number(button.dataset.stopPid || 0)
+      if (pendingProcessStops.has(processPID)) return
+      pendingProcessStops.add(processPID)
+      button.disabled = true
+      if (!(await api.confirmDialog(t('Stop process'), t('Stop this process?')))) {
+        pendingProcessStops.delete(processPID)
+        button.disabled = false
+        return
+      }
+      button.textContent = t('Stopping…')
+      await api.stopProcess(processPID)
     }
   } catch (error) {
     const port = parsePortConflict(String(error))
@@ -2310,8 +2348,10 @@ async function handleContainerOrProcessAction(button: HTMLButtonElement) {
       showError(String(error))
     }
   }
+  if (processPID) pendingProcessStops.delete(processPID)
   if (containerID) pendingContainers.delete(containerID)
   await refreshRuntime()
+  if (processPID && processFromResources) await loadResources()
 }
 
 async function handleDocumentChange(event: Event) {

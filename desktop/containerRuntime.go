@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -13,10 +14,11 @@ import (
 // machine (Docker Desktop, OrbStack, or Colima) — installed and,
 // separately, actually running (its docker context answers).
 type RuntimeEngineStatus struct {
-	Kind      string `json:"kind"` // "docker-desktop" | "orbstack" | "colima"
-	Name      string `json:"name"`
-	Installed bool   `json:"installed"`
-	Running   bool   `json:"running"`
+	Kind        string `json:"kind"` // "docker-desktop" | "orbstack" | "colima"
+	Name        string `json:"name"`
+	DownloadURL string `json:"download_url,omitempty"`
+	Installed   bool   `json:"installed"`
+	Running     bool   `json:"running"`
 }
 
 // ContainerRuntimeStatus is the full picture the Runtime view's engine
@@ -44,10 +46,11 @@ var containerRuntimeDefs = []struct {
 	name        string
 	appPath     string // "" for Colima, which isn't a macOS .app
 	contextName string
+	downloadURL string
 }{
-	{"docker-desktop", "Docker Desktop", "/Applications/Docker.app", "desktop-linux"},
-	{"orbstack", "OrbStack", "/Applications/OrbStack.app", "orbstack"},
-	{"colima", "Colima", "", "colima"},
+	{"docker-desktop", "Docker Desktop", "/Applications/Docker.app", "desktop-linux", "https://www.docker.com/products/docker-desktop/"},
+	{"orbstack", "OrbStack", "/Applications/OrbStack.app", "orbstack", "https://orbstack.dev/download"},
+	{"colima", "Colima", "", "colima", ""},
 }
 
 func runtimeEngineDef(kind string) (name, appPath, contextName string, ok bool) {
@@ -82,26 +85,36 @@ func contextReachable(contextName string) bool {
 // state, on demand (not polled continuously — each check shells out to
 // `docker`, cheap but not free).
 func (a *App) GetContainerRuntimeStatus() ContainerRuntimeStatus {
-	var engines []RuntimeEngineStatus
+	engines := make([]RuntimeEngineStatus, len(containerRuntimeDefs))
+	var wg sync.WaitGroup
+	for i := range containerRuntimeDefs {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			def := containerRuntimeDefs[i]
+			installed := false
+			if def.kind == "colima" {
+				_, err := exec.LookPath("colima")
+				installed = err == nil
+			} else {
+				installed = isAppBundleInstalled(def.appPath)
+			}
+			engines[i] = RuntimeEngineStatus{
+				Kind:        def.kind,
+				Name:        def.name,
+				DownloadURL: def.downloadURL,
+				Installed:   installed,
+				Running:     installed && contextReachable(def.contextName),
+			}
+		}()
+	}
+	wg.Wait()
 	running := 0
-	for _, def := range containerRuntimeDefs {
-		installed := false
-		if def.kind == "colima" {
-			_, err := exec.LookPath("colima")
-			installed = err == nil
-		} else {
-			installed = isAppBundleInstalled(def.appPath)
-		}
-		isRunning := installed && contextReachable(def.contextName)
-		if isRunning {
+	for _, engine := range engines {
+		if engine.Running {
 			running++
 		}
-		engines = append(engines, RuntimeEngineStatus{
-			Kind:      def.kind,
-			Name:      def.name,
-			Installed: installed,
-			Running:   isRunning,
-		})
 	}
 	_, brewErr := exec.LookPath("brew")
 	return ContainerRuntimeStatus{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -23,9 +24,12 @@ func main() {
 		MinHeight:        700,
 		BackgroundColour: &options.RGBA{R: 10, G: 14, B: 23, A: 1},
 		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        app.Startup,
-		OnShutdown:       app.Shutdown,
-		Bind:             []interface{}{app},
+		OnStartup: func(ctx context.Context) {
+			app.Startup(ctx)
+			setupMenuBar()
+		},
+		OnShutdown: app.Shutdown,
+		Bind:       []interface{}{app},
 		// Without an explicit Mac options block, Wails leaves the native
 		// green zoom button disabled (it only enables it when Mac.DisableZoom
 		// is reachable, i.e. Mac is non-nil) — this restores it. TitleBar
@@ -38,13 +42,8 @@ func main() {
 			Appearance: mac.NSAppearanceNameDarkAqua,
 		},
 		// Closing the window hides it instead of quitting, so Thaloca keeps
-		// scanning in the background — click the Dock icon to bring the
-		// window back. Quit fully via Cmd+Q or the Dock icon's Quit.
-		//
-		// A real menu bar icon was also tried (energye/systray) but caused
-		// a real SIGTRAP crash: it and Wails' own Cocoa run loop both need
-		// the main thread on macOS, and no reliable way to reconcile that
-		// for this Wails version was found. Not pursued further.
+		// scanning in the background. The macOS menu bar icon or Dock icon
+		// brings the window back; Cmd+Q and their Quit actions exit fully.
 		HideWindowOnClose: true,
 	})
 	if err != nil {

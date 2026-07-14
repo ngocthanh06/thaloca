@@ -60,9 +60,6 @@ func (a *App) InstalledApps() []InstalledApp {
 // Resources poll — apps come and go far less often than that, so only this
 // explicit refresh (the tab's "Refresh" button) re-scans.
 func (a *App) RefreshInstalledApps() []InstalledApp {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
 	var apps []InstalledApp
 	roots := []string{"/Applications"}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -83,7 +80,12 @@ func (a *App) RefreshInstalledApps() []InstalledApp {
 				continue
 			}
 			seen[appPath] = true
-			if app, ok := readAppInfo(ctx, appPath); ok {
+			// Bound each bundle independently. A slow/corrupt app icon must not
+			// expire one shared context and make every later app disappear.
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			app, ok := readAppInfo(ctx, appPath)
+			cancel()
+			if ok {
 				apps = append(apps, app)
 			}
 		}

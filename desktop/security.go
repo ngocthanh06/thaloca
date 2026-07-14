@@ -153,3 +153,29 @@ func (a *App) RevealFileInFinder(root, file string) error {
 	}
 	return nil
 }
+
+// OpenPathInFinder opens path (typically a whole repo folder from Source
+// Control) as its own Finder window — plain `open`, unlike
+// RevealFileInFinder's `open -R`, which shows the item selected inside its
+// *parent* folder instead of opening it.
+func (a *App) OpenPathInFinder(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "open", path).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(out))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("%s", message)
+	}
+	return nil
+}
+
+// HasVSCode reports whether VS Code's `code` CLI is on PATH, so the
+// frontend can show/hide an "Open in VS Code" action instead of exposing
+// one that would just fail with "command not found" on machines without it.
+func (a *App) HasVSCode() bool {
+	_, err := exec.LookPath("code")
+	return err == nil
+}

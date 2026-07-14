@@ -556,6 +556,26 @@ func githubRepoSlug(repo string) string {
 	return ownerRepoFromRemoteURL(string(output))
 }
 
+// RepoGitHubOwner returns the org/user that owns repo's origin remote —
+// e.g. "someuser" from git@github.com:someuser/somerepo.git — distinct
+// from the local git identity Source Control also shows (which is just
+// whatever this machine happens to be configured to commit as here, not
+// who actually owns the project, e.g. after cloning someone else's repo).
+// Purely local (a git remote read + string parse, same as githubRepoSlug);
+// unlike GitHubStatus, this never calls the network or checks auth, so
+// it's cheap enough to fetch on every repo selection.
+func (a *App) RepoGitHubOwner(repo string) string {
+	slug := githubRepoSlug(repo)
+	if slug == "" {
+		return ""
+	}
+	owner, _, found := strings.Cut(slug, "/")
+	if !found {
+		return ""
+	}
+	return owner
+}
+
 func (a *App) GitHubStatus(repo string) GitHubStatus {
 	status := GitHubStatus{Configured: loadAppConfig().GitHubClientID != ""}
 	if repo != "" {

@@ -74,14 +74,6 @@ export function renderServicesView(ctx: RuntimeContext): void {
     : `<div class="empty compact">${processAll.length ? t('No processes match the current search.') : t('No local processes are listening on TCP ports.')}</div>`
 }
 
-// Where to send someone to download an engine Thaloca can't install itself
-// (closed-source — see the "else" branch below for why only Colima gets a
-// real Install button).
-const ENGINE_DOWNLOAD_URL: Record<string, string> = {
-  'docker-desktop': 'https://www.docker.com/products/docker-desktop/',
-  orbstack: 'https://orbstack.dev/download',
-}
-
 // One row per known engine (Docker Desktop, OrbStack, Colima) — Installed
 // but not running gets a Start button, running gets a Stop button, and
 // Colima specifically gets an "Install" button when it isn't installed at
@@ -111,8 +103,8 @@ export function renderRuntimeEngineCard(status: ContainerRuntimeStatus | null, b
       action = status.homebrew_available
         ? `<button class="repo-action" data-engine-install="colima">${t('Install Colima')}</button>`
         : `<span class="muted">${t('Install Homebrew first')}</span>`
-    } else if (ENGINE_DOWNLOAD_URL[engine.kind]) {
-      action = `<button class="repo-action" data-open-external="${escapeHTML(ENGINE_DOWNLOAD_URL[engine.kind])}">${t('Download')}</button>`
+    } else if (engine.download_url) {
+      action = `<button class="repo-action" data-open-external="${escapeHTML(engine.download_url)}">${t('Download')}</button>`
     } else {
       action = `<span class="muted">${t('Not installed')}</span>`
     }
