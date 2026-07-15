@@ -13,12 +13,12 @@ import (
 	"thaloca.local/thaloca/internal/discovery"
 )
 
-func discoverJobs(ctx context.Context) []Job {
+func discoverJobs(ctx context.Context, dockerServices []discovery.Service) []Job {
 	var jobs []Job
 	jobs = append(jobs, scanCronJobs(ctx)...)
 	jobs = append(jobs, scanLaunchdJobs(ctx)...)
 	jobs = append(jobs, scanPM2Jobs(ctx)...)
-	jobs = append(jobs, scanDockerJobs(ctx)...)
+	jobs = append(jobs, scanDockerJobs(ctx, dockerServices)...)
 	sort.Slice(jobs, func(i, j int) bool {
 		if jobs[i].Source == jobs[j].Source {
 			return jobs[i].Name < jobs[j].Name
@@ -104,16 +104,12 @@ func scanPM2Jobs(ctx context.Context) []Job {
 	return jobs
 }
 
-// scanDockerJobs reuses discovery.ScanDocker's already-parsed container list
-// (rather than shelling out to `docker ps` a second time) and layers
-// job-specific concerns on top: filtering to running-only candidates that
-// look like background workloads, and enriching with the in-container
-// process list via `docker top`.
-func scanDockerJobs(ctx context.Context) []Job {
-	services, _, err := discovery.ScanDocker(ctx)
-	if err != nil {
-		return nil
-	}
+// scanDockerJobs reuses Snapshot's already-scanned container list (rather
+// than shelling out to `docker ps` again) and layers job-specific concerns
+// on top: filtering to running-only candidates that look like background
+// workloads, and enriching with the in-container process list via `docker
+// top`.
+func scanDockerJobs(ctx context.Context, services []discovery.Service) []Job {
 	var jobs []Job
 	for _, svc := range services {
 		if svc.Status == "stopped" {

@@ -182,9 +182,19 @@ const clipboardPollInterval = 1 * time.Second
 // event listener, which cannot see clipboard activity in other apps at all.
 func (a *App) pollSystemClipboard() {
 	lastText, _ := readSystemClipboard() // seed with whatever's already on the clipboard so it isn't recorded as a "new" copy on startup
+	lastChangeCount := pasteboardChangeCount()
 	ticker := time.NewTicker(clipboardPollInterval)
 	defer ticker.Stop()
 	for range ticker.C {
+		// NSPasteboard.changeCount only increments on an actual clipboard
+		// change, so on the (overwhelmingly common) tick where nothing was
+		// copied, this skips both the settings.json read below and spawning
+		// pbpaste entirely, instead of paying for both every second.
+		count := pasteboardChangeCount()
+		if count == lastChangeCount {
+			continue
+		}
+		lastChangeCount = count
 		if !a.GetClipboardHistoryEnabled() {
 			continue
 		}

@@ -326,6 +326,10 @@ export function OpenFileAtLine(arg1, arg2, arg3) {
   return window['go']['main']['App']['OpenFileAtLine'](arg1, arg2, arg3);
 }
 
+export function OpenHomebrewInstallInTerminal() {
+  return window['go']['main']['App']['OpenHomebrewInstallInTerminal']();
+}
+
 export function OpenInstalledApp(arg1) {
   return window['go']['main']['App']['OpenInstalledApp'](arg1);
 }
@@ -554,8 +558,8 @@ export function SetServerCronEnabled(arg1, arg2, arg3) {
   return window['go']['main']['App']['SetServerCronEnabled'](arg1, arg2, arg3);
 }
 
-export function Snapshot() {
-  return window['go']['main']['App']['Snapshot']();
+export function Snapshot(arg1) {
+  return window['go']['main']['App']['Snapshot'](arg1);
 }
 
 export function StageFile(arg1, arg2) {

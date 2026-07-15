@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -24,11 +25,13 @@ const (
 	resourceHistoryMaxAge  = 24 * time.Hour
 )
 
-// sampleResourceHistoryLoop periodically records a ResourceSample. Reuses
-// Resources() (the same read the tab itself polls) rather than duplicating
-// CPU/memory/disk/network collection — at one sample per minute this is a
-// small fraction of the cost Resources() already pays every 5s while the
-// tab is open.
+// sampleResourceHistoryLoop periodically records a ResourceSample. Reads
+// only CPU/memory/disk/network directly (the same collectors Resources()
+// itself calls) rather than the full Resources() — a history point doesn't
+// need Resources()'s process/lsof port scan, GPU, battery, or thermal reads
+// (TopProcess is left blank here; nothing in the frontend renders it, and
+// the Resources tab's own 5s poll while open still gets full Resources()
+// data).
 func (a *App) sampleResourceHistoryLoop() {
 	ticker := time.NewTicker(resourceSampleInterval)
 	defer ticker.Stop()
@@ -39,33 +42,34 @@ func (a *App) sampleResourceHistoryLoop() {
 }
 
 func (a *App) sampleResourceHistory() {
-	snapshot := a.Resources()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cpu := readCPUStats(ctx)
+	mem := readMemoryStats(ctx)
+	disks := readDiskStats(ctx)
+	network := a.readNetworkStats(ctx)
 
 	var diskPercent float64
-	for _, d := range snapshot.Disks {
+	for _, d := range disks {
 		if d.MountPoint == "/" {
 			diskPercent = d.UsedPercent
 			break
 		}
 	}
 	var rx, tx float64
-	for _, n := range snapshot.Network {
+	for _, n := range network {
 		rx += n.RxBytesPerSec
 		tx += n.TxBytesPerSec
-	}
-	var topProcess string
-	if len(snapshot.Processes) > 0 {
-		topProcess = snapshot.Processes[0].Command
 	}
 
 	sample := ResourceSample{
 		At:               time.Now().Format(time.RFC3339),
-		CPUPercent:       snapshot.CPU.UserPercent + snapshot.CPU.SystemPercent,
-		MemPercent:       snapshot.Memory.UsedPercent,
+		CPUPercent:       cpu.UserPercent + cpu.SystemPercent,
+		MemPercent:       mem.UsedPercent,
 		DiskPercent:      diskPercent,
 		NetRxBytesPerSec: rx,
 		NetTxBytesPerSec: tx,
-		TopProcess:       topProcess,
 	}
 
 	a.resourceHistoryMu.Lock()

@@ -110,6 +110,37 @@ func applyToolActionCommands(tools []ToolInfo, installed map[string]bool) {
 	}
 }
 
+// homebrewInstallCommand is Homebrew's own official bootstrap one-liner
+// (https://brew.sh). Thaloca never runs this itself — see installSpecs'
+// comment above on why (it can prompt for a sudo password or an Enter
+// keypress, which has no way to reach the user when run headless) — this is
+// only staged in a real Terminal window so the user runs it themselves and
+// answers any such prompt normally.
+const homebrewInstallCommand = `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+
+// OpenHomebrewInstallInTerminal opens Terminal.app with Homebrew's official
+// install command staged (not run) in a new window. This is the one path
+// off the "Requires Homebrew" dead end shown on a brand-new Mac that has
+// nothing else in installSpecs available yet.
+func (a *App) OpenHomebrewInstallInTerminal() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	escaped := strings.ReplaceAll(homebrewInstallCommand, `"`, `\"`)
+	script := fmt.Sprintf(`tell application "Terminal"
+	activate
+	do script "%s"
+end tell`, escaped)
+	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(out))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("%s", message)
+	}
+	return nil
+}
+
 // installPrereqMessage explains what to install first when an install
 // spec's own binary (bin) isn't present yet. Thaloca deliberately never
 // runs Homebrew's own install script itself (see installSpecs' comment on

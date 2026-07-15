@@ -46,12 +46,13 @@ async function toggle(entry: ConfigFileEntry): Promise<void> {
       message = `${t('Disable Claude Code telemetry')}? ${t('This writes DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING, and DISABLE_NON_ESSENTIAL_MODEL_CALLS (all "true") plus CLAUDE_CODE_ENABLE_TELEMETRY ("false") into this file\'s "env" block — re-enabling removes all four again. If any of these are also set as real shell environment variables, those can still override this.')}`
     } else {
       const scope = entry.source_name ? ` (${t('sourced from')} ${entry.source_name})` : ''
-      // "tool" entries (Git/npm/Docker/Claude Code config) commonly mix real
-      // login/auth state into the same file as ordinary settings — spell out
-      // what's actually inside before renaming it away, since the per-row
-      // description already says so (see toolConfigDefs in configFiles.go).
-      const toolWarning = entry.category === 'tool' ? ` ${entry.description} ${t('Disabling this can affect login, auth, or settings for it until you re-enable it.')}` : ''
-      message = `${t('Disable')} ${entry.name}${scope}?${toolWarning} ${t('This renames it to')} "${entry.name}.disabled" ${t('on disk — nothing is deleted, and you can enable it again the same way.')}`
+      // Every category's per-row description already spells out what's
+      // actually inside / at risk (login-auth mix for "tool" entries, an
+      // unguarded source line or a git-tracked file for "shell"/"home"
+      // entries) — surface it here too, not just in the page's static text,
+      // since that's the one place guaranteed to be read before the rename
+      // actually happens.
+      message = `${t('Disable')} ${entry.name}${scope}? ${entry.description} ${t('This renames it to')} "${entry.name}.disabled" ${t('on disk — nothing is deleted, and you can enable it again the same way.')}`
     }
     if (!(await api.confirmDialog(t('Disable config file'), message))) return
   }

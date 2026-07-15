@@ -803,7 +803,7 @@ export function normalizePorts(value: unknown): PortUsage[] {
 // or before Wails finishes injecting) — every api.* call below already
 // falls back to a browser-safe default via `||` for that case.
 interface WailsApp {
-  Snapshot(): Promise<Partial<Snapshot>>
+  Snapshot(force: boolean): Promise<Partial<Snapshot>>
   Resources(): Promise<Partial<ResourceSnapshot>>
   InstalledApps(): Promise<InstalledApp[]>
   RefreshInstalledApps(): Promise<InstalledApp[]>
@@ -827,6 +827,7 @@ interface WailsApp {
   Tools(): Promise<Partial<ToolsSnapshot>>
   RefreshTools(): Promise<Partial<ToolsSnapshot>>
   RunToolAction(tool: string, action: string): Promise<string>
+  OpenHomebrewInstallInTerminal(): Promise<void>
   ToolActionStatus(jobID: string): Promise<Partial<ToolActionStatus>>
   SearchBrewPackages(query: string): Promise<BrewSearchResult[]>
   ListBrewPackages(): Promise<Partial<BrewPackages>>
@@ -985,9 +986,9 @@ export const api = {
   // Normalize even the real binding's result: Go's zero value for a nil
   // slice serializes as JSON null, not [], so every list field must still
   // be defended against null here, not just in the no-binding fallback path.
-  snapshot: (): Promise<Snapshot> => {
+  snapshot: (force: boolean): Promise<Snapshot> => {
     const fn = wailsApp()?.Snapshot
-    return fn ? fn().then(normalizeSnapshot) : Promise.resolve(normalizeSnapshot(null))
+    return fn ? fn(force).then(normalizeSnapshot) : Promise.resolve(normalizeSnapshot(null))
   },
   resources: (): Promise<ResourceSnapshot> => {
     const fn = wailsApp()?.Resources
@@ -1185,6 +1186,10 @@ export const api = {
   openPathInFinder: (path: string): Promise<void> => {
     const fn = wailsApp()?.OpenPathInFinder
     return fn ? fn(path) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  openHomebrewInstallInTerminal: (): Promise<void> => {
+    const fn = wailsApp()?.OpenHomebrewInstallInTerminal
+    return fn ? fn() : Promise.reject(new Error('Wails runtime not available'))
   },
   hasVSCode: (): Promise<boolean> => wailsApp()?.HasVSCode?.() || Promise.resolve(false),
   scanContainerImage: (image: string): Promise<SecurityReport> => {

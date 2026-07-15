@@ -8,20 +8,20 @@ import {
   type ContainerRuntimeStatus,
 } from './api'
 import { escapeHTML, formatBytes, formatDuration, formatDate, getStatusClass, getSourceBadgeClass, matchesSearch, showLoading, showError, startGlobalLoading, stopGlobalLoading, hideSplashScreen } from './dom'
+import { copyToClipboard } from './clipboard'
 import { applyStoredTheme, getTheme, setTheme } from './theme'
 import { LOCALE_CHANGE_EVENT, t } from './i18n'
 import { renderOverviewView } from './views/overview'
 import { renderResourcesView, type ProcessSort } from './views/resources'
 import { wireResourceHistoryHover, type HistoryWindow } from './components/resourceCharts'
 import { renderToolsView, renderPackagesView, type ToolActionState, type PackageRegistryKey } from './views/tools'
-import { initUtilitiesView } from './views/utilities'
 import { initEnvFilesView } from './views/envFiles'
 import { initConfigFilesView } from './views/configFiles'
 import {
   renderServersView, type ServerTerminalState, type ServerContainersState, type ServerCronState,
   type ServerFilesState, type ServerBulkRunState, type ServerBulkRunJobStatus,
 } from './views/servers'
-import { openServerTerminal, closeServerTerminal, reattachServerTerminal, type ServerTerminalStatus } from './serverTerminal'
+import type { ServerTerminalStatus } from './serverTerminal'
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import {
   renderServicesView, renderPortsView, renderJobsView, toggleProjectExpanded, expandProject,
@@ -79,6 +79,17 @@ let serverContainers: Map<string, ServerContainersState> = new Map()
 let serverCron: Map<string, ServerCronState> = new Map()
 let serverFiles: Map<string, ServerFilesState> = new Map()
 let serverTerminal: ServerTerminalState | null = null
+// xterm.js (serverTerminal.ts's only real dependency) is loaded lazily —
+// only opening a server terminal actually needs it, so a user who never
+// does keeps it out of the app's eager startup bundle. Every call site
+// below runs after a terminal was already opened once (guarded by
+// serverTerminal being non-null), so the module is guaranteed cached by
+// then except at the one entry point, toggleServerTerminal, that opens it.
+let serverTerminalModulePromise: Promise<typeof import('./serverTerminal')> | null = null
+function loadServerTerminalModule(): Promise<typeof import('./serverTerminal')> {
+  if (!serverTerminalModulePromise) serverTerminalModulePromise = import('./serverTerminal')
+  return serverTerminalModulePromise
+}
 let showAddServerForm = false
 let editingServer: ServerConnection | null = null
 let sshConfigHosts: SSHConfigHost[] | undefined = undefined
@@ -852,7 +863,8 @@ function renderServers(): void {
   // produced so scrollback survives instead of the session being recreated.
   if (serverTerminal) {
     const mount = document.querySelector<HTMLElement>(`[data-server-terminal-mount="${CSS.escape(serverTerminal.serverId)}"]`)
-    if (mount) reattachServerTerminal(serverTerminal.serverId, mount)
+    const serverId = serverTerminal.serverId
+    if (mount) void loadServerTerminalModule().then(m => m.reattachServerTerminal(serverId, mount))
   }
 }
 
@@ -1037,7 +1049,7 @@ async function handleRemoveServer(id: string): Promise<void> {
   if (editingServer?.id === id) editingServer = null
   if (serverTerminal?.serverId === id) {
     serverTerminal = null
-    void closeServerTerminal()
+    void loadServerTerminalModule().then(m => m.closeServerTerminal())
   }
   await loadServers()
 }
@@ -1076,7 +1088,7 @@ function closeOtherServerPanels(id: string, except: 'containers' | 'cron' | 'fil
   if (except !== 'files') serverFiles.delete(id)
   if (except !== 'terminal' && serverTerminal?.serverId === id) {
     serverTerminal = null
-    void closeServerTerminal()
+    void loadServerTerminalModule().then(m => m.closeServerTerminal())
   }
 }
 
@@ -1189,7 +1201,7 @@ async function toggleServerTerminal(id: string): Promise<void> {
   if (serverTerminal?.serverId === id) {
     serverTerminal = null
     renderServers()
-    await closeServerTerminal()
+    await (await loadServerTerminalModule()).closeServerTerminal()
     return
   }
 
@@ -1199,6 +1211,7 @@ async function toggleServerTerminal(id: string): Promise<void> {
 
   const mount = document.querySelector<HTMLElement>(`[data-server-terminal-mount="${CSS.escape(id)}"]`)
   if (!mount) return
+  const { openServerTerminal } = await loadServerTerminalModule()
   await openServerTerminal(id, mount, (status: ServerTerminalStatus, detail?: string) => {
     if (!serverTerminal || serverTerminal.serverId !== id) return
     serverTerminal = { serverId: id, status, detail }
@@ -1490,7 +1503,10 @@ function bindEvents() {
       document.querySelectorAll('#tools-subtabs .subtab, #tools-view .subview').forEach(el => el.classList.remove('active'))
       btn.classList.add('active')
       document.getElementById(`subview-tools-${btn.getAttribute('data-tools-subtab')}`)!.classList.add('active')
-      if (btn.getAttribute('data-tools-subtab') === 'utilities') initUtilitiesView()
+      // Dynamic import: mermaid (diagram rendering) is a sizeable dependency
+      // of this view alone — loading it only once Utilities is actually
+      // visited keeps it out of the app's eager startup bundle.
+      if (btn.getAttribute('data-tools-subtab') === 'utilities') void import('./views/utilities').then(m => m.initUtilitiesView())
       if (btn.getAttribute('data-tools-subtab') === 'env') initEnvFilesView()
       if (btn.getAttribute('data-tools-subtab') === 'config-files') initConfigFilesView()
     })
@@ -1526,7 +1542,18 @@ function bindEvents() {
 
   // Auto-refresh only runtime data. Git activity is intentionally not polled:
   // it refreshes on app load, manual refresh, or future git event hooks.
-  refreshTimer = window.setInterval(loadRuntime, 30_000)
+  // Closing the window only hides it (HideWindowOnClose) rather than
+  // quitting, so without the document.hidden check this timer would keep
+  // running the full Docker/git/ports scan every 30s indefinitely in the
+  // background. Skipping while hidden and catching up immediately on
+  // visibilitychange means a reopened window never waits out the rest of a
+  // stale 30s tick for fresh data.
+  refreshTimer = window.setInterval(() => {
+    if (!document.hidden) void loadRuntime()
+  }, 30_000)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) void loadRuntime()
+  })
 }
 
 async function loadAll() {
@@ -1543,7 +1570,7 @@ async function loadAll() {
     // force=true: this is the header's manual Refresh (and the initial
     // app-load call) — a repo cloned moments ago should show up right
     // away rather than waiting out the 5-minute repo-path cache TTL.
-    await Promise.all([loadRuntime(), loadActivity(true)])
+    await Promise.all([loadRuntime(true), loadActivity(true)])
   } catch (error) {
     showError(String(error))
   } finally {
@@ -1554,9 +1581,9 @@ async function loadAll() {
 
 let runtimeInFlight: Promise<void> | null = null
 
-function loadRuntime(): Promise<void> {
+function loadRuntime(force = false): Promise<void> {
   if (!runtimeInFlight) {
-    runtimeInFlight = doLoadRuntime().finally(() => { runtimeInFlight = null })
+    runtimeInFlight = doLoadRuntime(force).finally(() => { runtimeInFlight = null })
   }
   return runtimeInFlight
 }
@@ -1632,14 +1659,14 @@ async function handleEngineInstall(): Promise<void> {
   await loadContainerRuntimeStatus()
 }
 
-async function doLoadRuntime() {
+async function doLoadRuntime(force: boolean) {
   // One discovery pass (App.Snapshot) covers services/ports/jobs plus the
   // project grouping and anomaly detection Overview needs — previously
   // these were 4 separate bindings the frontend always called together,
   // with Overview redoing the same service/job discovery the other three
   // had just done.
   const runtimeVisible = document.getElementById('runtime-view')?.classList.contains('active') ?? false
-  const [snapshot] = await Promise.all([api.snapshot(), runtimeVisible ? loadContainerRuntimeStatus() : Promise.resolve()])
+  const [snapshot] = await Promise.all([api.snapshot(force), runtimeVisible ? loadContainerRuntimeStatus() : Promise.resolve()])
   services = normalizeServices(snapshot.services)
   ports = normalizePorts(snapshot.ports)
   jobs = normalizeJobs(snapshot.jobs)
@@ -1755,7 +1782,7 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install]')
   if (!button) {
     // Activity dashboard: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -2035,6 +2062,15 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.copyCommitHash !== undefined) {
+    try {
+      await copyToClipboard(button.dataset.copyCommitHash, 'Commit hash')
+    } catch (error) {
+      showError(String(error))
+    }
+    return
+  }
+
   if (button.dataset.stage || button.dataset.unstage || button.dataset.resolve || button.dataset.commit || button.dataset.diffFile !== undefined) {
     await handleChangesAction(button)
     return
@@ -2113,6 +2149,15 @@ async function handleDocumentClick(event: Event) {
   if (button.dataset.openVscode !== undefined) {
     try {
       await api.openFileAtLine(button.dataset.openVscode, '', 0)
+    } catch (error) {
+      showError(String(error))
+    }
+    return
+  }
+
+  if (button.dataset.openHomebrewInstall !== undefined) {
+    try {
+      await api.openHomebrewInstallInTerminal()
     } catch (error) {
       showError(String(error))
     }

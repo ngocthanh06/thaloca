@@ -148,7 +148,12 @@ func scanDockerContext(ctx context.Context, contextName string) ([]Service, erro
 		args = append(args, "--context", contextName)
 	}
 	// -a includes stopped containers so they can be started from the UI.
-	args = append(args, "ps", "-a", "--format", "json")
+	// "{{json .}}" (Go template form) rather than the bare "json" keyword —
+	// the same output, but the bare keyword needs Docker CLI >= 23.0
+	// (Docker Desktop 4.17+), so anyone still on 4.16.2 or older got a
+	// silent zero-container result (docker ps exits 0 printing the literal
+	// word "json" per row, which then fails to parse as JSON below).
+	args = append(args, "ps", "-a", "--format", "{{json .}}")
 	output, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
 		return nil, err
@@ -257,25 +262,33 @@ func ScanProcesses(ctx context.Context) ([]Service, error) {
 // ScanGitRepos finds git repositories under the given search roots (each
 // walked up to 5 levels deep) and returns them as Service values.
 func ScanGitRepos(_ context.Context, roots []string) ([]Service, error) {
-	var services []Service
+	var paths []string
 	for _, dir := range roots {
 		repos, _ := FindGitRepos(dir, 5)
-		for _, repoPath := range repos {
-			svc := Service{
-				ID:       "git:" + strings.ReplaceAll(repoPath, "/", "-"),
-				Name:     filepath.Base(repoPath),
-				Source:   "git",
-				Ports:    []int{},
-				Status:   "active",
-				RepoPath: repoPath,
-				Command:  "git repository",
-				Labels:   map[string]string{},
-			}
-			services = append(services, svc)
-		}
+		paths = append(paths, repos...)
 	}
+	return ServicesFromRepoPaths(paths), nil
+}
 
-	return services, nil
+// ServicesFromRepoPaths builds Service values for repo paths already known
+// (e.g. from App.cachedRepoPaths), without re-walking the filesystem — the
+// walk itself (FindGitRepos) is the expensive part ScanGitRepos otherwise
+// redoes on every call.
+func ServicesFromRepoPaths(paths []string) []Service {
+	var services []Service
+	for _, repoPath := range paths {
+		services = append(services, Service{
+			ID:       "git:" + strings.ReplaceAll(repoPath, "/", "-"),
+			Name:     filepath.Base(repoPath),
+			Source:   "git",
+			Ports:    []int{},
+			Status:   "active",
+			RepoPath: repoPath,
+			Command:  "git repository",
+			Labels:   map[string]string{},
+		})
+	}
+	return services
 }
 
 // Deduplicate merges services that share a port, keeping the highest-

@@ -167,6 +167,8 @@ export function OpenContainerTerminal(arg1:string):Promise<void>;
 
 export function OpenFileAtLine(arg1:string,arg2:string,arg3:number):Promise<void>;
 
+export function OpenHomebrewInstallInTerminal():Promise<void>;
+
 export function OpenInstalledApp(arg1:string):Promise<void>;
 
 export function OpenPathInFinder(arg1:string):Promise<void>;
@@ -281,7 +283,7 @@ export function SetPullRequestLabels(arg1:string,arg2:number,arg3:Array<string>)
 
 export function SetServerCronEnabled(arg1:string,arg2:number,arg3:boolean):Promise<void>;
 
-export function Snapshot():Promise<main.Snapshot>;
+export function Snapshot(arg1:boolean):Promise<main.Snapshot>;
 
 export function StageFile(arg1:string,arg2:string):Promise<void>;
 

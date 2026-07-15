@@ -247,6 +247,7 @@ const vi: Record<string, string> = {
   'Install/Update not offered here to avoid a conflicting Homebrew copy.': 'Cài đặt/Cập nhật không khả dụng ở đây để tránh xung đột với bản Homebrew.',
   'Requires Homebrew — install it from https://brew.sh, then refresh this tab.':
     'Cần có Homebrew — cài đặt tại https://brew.sh, sau đó làm mới tab này.',
+  'Install Homebrew…': 'Cài đặt Homebrew…',
   'Requires Go — install Go first (e.g. from https://go.dev/dl/), then refresh this tab.':
     'Cần có Go — cài đặt Go trước (ví dụ tại https://go.dev/dl/), sau đó làm mới tab này.',
   'missing:': 'thiếu:',

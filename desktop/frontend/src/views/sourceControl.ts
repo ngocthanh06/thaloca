@@ -1075,6 +1075,7 @@ function renderCommitFilesPanel(path: string, detail: RepoDetail): string {
       <header class="commit-detail-header">
         <button class="repo-action" data-commit-back="1" data-repo="${path}">✕</button>
         <span class="commit-hash">${escapeHTML((detail.commitHash || '').slice(0, 10))}</span>
+        <button class="repo-action" data-copy-commit-hash="${escapeHTML(detail.commitHash || '')}" title="Copy full commit hash">⧉</button>
         <strong>${escapeHTML(detail.commitSubject || '')}</strong>
       </header>
       ${files.length === 0

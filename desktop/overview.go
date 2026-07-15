@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"thaloca.local/thaloca/internal/discovery"
 )
 
 // ProjectGroup aggregates discovered services that share the same project
@@ -68,12 +70,22 @@ type serviceScanState struct {
 // (restart loops, prolonged degraded state, errored jobs) detected by
 // diffing against the previous scan (see App.scanState). Everything here
 // is recomputed live on every call; nothing is written to disk.
-func (a *App) Snapshot() Snapshot {
+//
+// Docker is scanned exactly once here and shared with discoverAll/
+// discoverPorts/discoverJobs (previously each scanned it independently),
+// and the git repo list comes from the same 5-minute cache Activity already
+// uses (see cachedRepoPaths) instead of a fresh filesystem walk every call.
+// force bypasses that cache's TTL — pass true for a user-initiated refresh
+// (a repo cloned moments ago should show up immediately), false for the
+// background auto-refresh.
+func (a *App) Snapshot(force bool) Snapshot {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	services, dockerStatus := discoverAll(ctx)
-	ports := discoverPorts(ctx)
-	jobs := discoverJobs(ctx)
+	dockerServices, dockerContextStatuses, dockerErr := discovery.ScanDocker(ctx)
+	repoPaths := a.cachedRepoPaths(force)
+	services, dockerStatus := discoverAll(ctx, repoPaths, dockerServices, dockerContextStatuses, dockerErr)
+	ports := discoverPorts(ctx, dockerServices)
+	jobs := discoverJobs(ctx, dockerServices)
 	a.diffPortEvents(ports)
 	a.diffJobEvents(jobs)
 

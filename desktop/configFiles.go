@@ -158,13 +158,12 @@ func shellSourcedEntries() []ConfigFileEntry {
 
 				guarded := shellSourceGuarded(line)
 				tracked := isGitTrackedAt(filepath.Dir(full), filepath.Base(full))
-				toggleable := guarded && !tracked
 				description := fmt.Sprintf("Sourced from %s, line %d.", rc, lineNum+1)
 				switch {
 				case tracked:
-					description += " Not toggleable: this file is committed to git."
+					description += " This file is committed to git — disabling it here will show up as an uncommitted change there until you re-enable it."
 				case !guarded:
-					description += " Not toggleable: that source line isn't guarded against a missing file, so disabling it here would print an error in every new shell."
+					description += " Warning: that source line isn't guarded against a missing file, so disabling it here will print an error in every new shell until you re-enable it."
 				default:
 					description += " Its source line already skips it when missing, so switching it off here is safe."
 				}
@@ -177,7 +176,7 @@ func shellSourcedEntries() []ConfigFileEntry {
 					SourceName:  rc,
 					Exists:      true,
 					Enabled:     activeErr == nil,
-					Toggleable:  toggleable,
+					Toggleable:  true,
 					Description: description,
 				})
 			}
@@ -242,7 +241,7 @@ func filesInDir(dir string, requireDotPrefix bool, skip map[string]bool, describ
 			Path:        full,
 			Exists:      true,
 			Enabled:     activeErr == nil,
-			Toggleable:  !tracked,
+			Toggleable:  true,
 			Description: describe(base, tracked),
 		})
 	}
@@ -273,7 +272,7 @@ func hiddenDirEntries(home string, skip map[string]bool) []ConfigFileEntry {
 	describe := func(location string) func(name string, tracked bool) string {
 		return func(name string, tracked bool) string {
 			if tracked {
-				return fmt.Sprintf("Sitting in %s, but committed to git here, so Thaloca won't rename it.", location)
+				return fmt.Sprintf("Sitting in %s. This file is committed to git — disabling it here will show up as an uncommitted change there until you re-enable it.", location)
 			}
 			return fmt.Sprintf("Sitting in %s. Not referenced by any shell startup file Thaloca scanned, so switching it off just renames it — nothing else is known to react to that automatically.", location)
 		}
@@ -347,7 +346,7 @@ func homeDotfileEntries(shell []ConfigFileEntry) []ConfigFileEntry {
 				location = "directly in your home folder"
 			}
 			if tracked {
-				return fmt.Sprintf("Sitting %s, but committed to git here, so Thaloca won't rename it.", location)
+				return fmt.Sprintf("Sitting %s. This file is committed to git — disabling it here will show up as an uncommitted change there until you re-enable it.", location)
 			}
 			return fmt.Sprintf("Sitting %s. Not itself referenced by any shell startup file Thaloca scanned, so switching it off just renames it — nothing else is known to react to that automatically.", location)
 		})...)
