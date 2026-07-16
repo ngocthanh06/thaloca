@@ -111,15 +111,13 @@ func applyToolActionCommands(tools []ToolInfo, installed map[string]bool) {
 }
 
 // homebrewInstallCommand is Homebrew's own official bootstrap one-liner
-// (https://brew.sh). Thaloca never runs this itself — see installSpecs'
-// comment above on why (it can prompt for a sudo password or an Enter
-// keypress, which has no way to reach the user when run headless) — this is
-// only staged in a real Terminal window so the user runs it themselves and
-// answers any such prompt normally.
+// (https://brew.sh). It is only launched in a real Terminal window, after
+// the frontend's native confirmation dialog, so its sudo/Enter prompts stay
+// visible and interactive.
 const homebrewInstallCommand = `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
 
-// OpenHomebrewInstallInTerminal opens Terminal.app with Homebrew's official
-// install command staged (not run) in a new window. This is the one path
+// OpenHomebrewInstallInTerminal opens Terminal.app and runs Homebrew's official
+// install command in a new window. The frontend must confirm first. This is the one path
 // off the "Requires Homebrew" dead end shown on a brand-new Mac that has
 // nothing else in installSpecs available yet.
 func (a *App) OpenHomebrewInstallInTerminal() error {

@@ -1108,34 +1108,6 @@ select.search-input {
   display: block;
 }
 
-.quality-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.quality-strip article {
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-}
-
-.quality-strip span {
-  display: block;
-  color: var(--fg-subtle);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.quality-strip strong {
-  display: block;
-  margin-top: 3px;
-  font-size: 20px;
-}
-
 .activity-toolbar strong,
 .repo-card strong {
   display: block;
@@ -5082,6 +5054,14 @@ select.search-input {
   background: var(--bg-card);
 }
 
+/* Without this, .server-terminal (a grid item like any other child of
+   .container-row) falls into the next auto-placed cell — the 14px status-dot
+   column — instead of spanning the row, same reason .row-log/.image-scan-panel
+   above need it. */
+.container-row .server-terminal {
+  grid-column: 1 / -1;
+}
+
 /* ===== Source Control view ===== */
 
 .source-toolbar {
@@ -6025,37 +6005,6 @@ pre.diff {
   color: var(--accent);
 }
 
-.overview-recent {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.overview-recent-row {
-  display: flex;
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  font-size: 12.5px;
-}
-
-.overview-recent-time {
-  flex: none;
-  color: var(--fg-subtle);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-
-.timeline-row {
-  cursor: pointer;
-}
-
-.timeline-row:hover {
-  background: var(--bg-elevated);
-}
-
 /* ========== Service Inspector ========== */
 
 .inspector-panel {
@@ -6641,6 +6590,10 @@ pre.diff {
   grid-column: span 1;
 }
 
+.server-add-field-half {
+  grid-column: span 2;
+}
+
 .server-add-field-wide {
   grid-column: 1 / -1;
 }
@@ -6970,6 +6923,57 @@ pre.diff {
   display: flex;
   gap: 6px;
   margin-left: auto;
+}
+
+.server-vpn {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.server-vpn-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.server-vpn-textarea {
+  width: 100%;
+  min-height: 140px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.server-vpn-textarea:focus {
+  border-color: var(--accent);
+}
+
+.server-vpn-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.server-vpn-engine-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.server-vpn-engine-picker .btn-secondary.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 
 .server-files {

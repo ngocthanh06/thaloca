@@ -2,7 +2,7 @@ import {
   api, normalizeActivity, normalizeServices, normalizeJobs, normalizePorts,
   type Service, type PortUsage, type HealthStatus,
   type RepositoryActivity, type ActivitySummary,
-  type Job, type OverviewResult, type TimelineEvent, type ResourceSnapshot, type ToolsSnapshot,
+  type Job, type OverviewResult, type ResourceSnapshot, type ToolsSnapshot,
   type ServerConnection, type ServerHealth, type RemoteContainer, type InstalledApp, type ResourceSample,
   type SecurityReport, type SSHConfigHost, type RemoteFile, type BrewSearchResult, type BrewPackages, type RegistryPackage,
   type ContainerRuntimeStatus,
@@ -19,15 +19,15 @@ import { initEnvFilesView } from './views/envFiles'
 import { initConfigFilesView } from './views/configFiles'
 import {
   renderServersView, type ServerTerminalState, type ServerContainersState, type ServerCronState,
-  type ServerFilesState, type ServerBulkRunState, type ServerBulkRunJobStatus,
+  type ServerFilesState, type ServerBulkRunState, type ServerBulkRunJobStatus, type ServerVPNPanelState,
 } from './views/servers'
 import type { ServerTerminalStatus } from './serverTerminal'
+import type { ContainerTerminalStatus } from './containerTerminal'
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import {
   renderServicesView, renderPortsView, renderJobsView, toggleProjectExpanded, expandProject,
   checkAllHealth as checkAllHealthRuntime, renderRuntimeEngineCard,
 } from './views/runtime'
-import { renderTimelineView, TIMELINE_NAVIGATE_EVENT, type TimelineRow } from './views/timeline'
 import {
   renderSourceView, setSourceFilter, openRepoInSourceControl, togglePinRepo,
   loadRepoTab, refreshGHStatus, handleGHAction, handleSyncAction, handleLoadMore,
@@ -78,6 +78,7 @@ let serverKeyWarnings: Map<string, string> = new Map()
 let serverContainers: Map<string, ServerContainersState> = new Map()
 let serverCron: Map<string, ServerCronState> = new Map()
 let serverFiles: Map<string, ServerFilesState> = new Map()
+let serverVPN: Map<string, ServerVPNPanelState> = new Map()
 let serverTerminal: ServerTerminalState | null = null
 // xterm.js (serverTerminal.ts's only real dependency) is loaded lazily —
 // only opening a server terminal actually needs it, so a user who never
@@ -90,6 +91,15 @@ function loadServerTerminalModule(): Promise<typeof import('./serverTerminal')> 
   if (!serverTerminalModulePromise) serverTerminalModulePromise = import('./serverTerminal')
   return serverTerminalModulePromise
 }
+// container id -> terminal panel state. Unlike serverTerminal above (one
+// live session app-wide), several containers may each have their own
+// terminal open at once — see containerTerminal.ts's header comment for why.
+const containerTerminals = new Map<string, { status: ContainerTerminalStatus; detail?: string }>()
+let containerTerminalModulePromise: Promise<typeof import('./containerTerminal')> | null = null
+function loadContainerTerminalModule(): Promise<typeof import('./containerTerminal')> {
+  if (!containerTerminalModulePromise) containerTerminalModulePromise = import('./containerTerminal')
+  return containerTerminalModulePromise
+}
 let showAddServerForm = false
 let editingServer: ServerConnection | null = null
 let sshConfigHosts: SSHConfigHost[] | undefined = undefined
@@ -97,8 +107,6 @@ let selectedServers: Set<string> = new Set()
 let serverBulkRun: ServerBulkRunState | null = null
 let serverBulkJobIds: Map<string, string> = new Map()
 let serverBulkRunTimer: number | null = null
-let timelineEvents: TimelineEvent[] = []
-let timelineFilter: 'all' | 'runtime' | 'git' | 'health' | 'action' = 'all'
 let healthCache: Map<string, HealthStatus> = new Map()
 let refreshTimer: number | null = null
 let searchQuery = ''
@@ -174,12 +182,6 @@ function renderApp() {
               <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h4a2 2 0 0 1 2 2v1"/><path d="M9 18h4a2 2 0 0 0 2-2v-1"/>
             </svg>
             <span>${t('Source Control')}</span>
-          </button>
-          <button class="nav-btn" data-view="activity">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-            </svg>
-            <span>${t('Activity')}</span>
           </button>
           <button class="nav-btn" data-view="resources">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -281,51 +283,24 @@ function renderApp() {
         </section>
 
         <section id="source-view" class="view">
-          <div class="source-toolbar">
-            <p class="subview-desc">${t('Work with your repositories like SourceTree: stage, commit, diff, resolve conflicts, browse history, graph and review pull requests.')}</p>
-            <div id="gh-connect-area"></div>
-          </div>
-          <div class="source-layout">
-            <div class="source-left">
-              <input id="source-filter" class="search-input source-filter" type="search" placeholder="${t('Filter repositories...')}">
-              <div id="source-repos" class="source-repos"></div>
-            </div>
-            <div id="source-detail" class="source-detail"></div>
-          </div>
-        </section>
-
-        <section id="activity-view" class="view">
-          <nav class="subtabs" id="activity-subtabs">
-            <button class="subtab active" data-activity-subtab="timeline">${t('Timeline')}</button>
-            <button class="subtab" data-activity-subtab="week">${t('This week')}</button>
-            <button class="subtab" data-activity-subtab="repos">${t('Repositories')}</button>
+          <nav class="subtabs" id="source-subtabs">
+            <button class="subtab active" data-source-subtab="workspace">${t('Workspace')}</button>
+            <button class="subtab" data-source-subtab="repositories">${t('Repositories')}</button>
           </nav>
-
-          <div id="activity-subview-timeline" class="subview active">
-            <nav class="subtabs" id="timeline-filters">
-              <button class="subtab active" data-timeline-filter="all">${t('All')}</button>
-              <button class="subtab" data-timeline-filter="runtime">${t('Runtime')}</button>
-              <button class="subtab" data-timeline-filter="git">Git</button>
-            </nav>
-            <div id="timeline-list" class="overview-recent"></div>
-          </div>
-
-          <div id="activity-subview-week" class="subview">
-            <h3 class="section-title">${t('This week across all repositories')}</h3>
-            <div class="activity-stats">
-              <article><span>${t('Commits (7d)')}</span><strong id="act-commits">—</strong></article>
-              <article><span>${t('Active Days')}</span><strong id="act-days">—</strong></article>
-              <article><span>${t('Ahead')}</span><strong id="act-ahead">—</strong></article>
-              <article><span>${t('Behind')}</span><strong id="act-behind">—</strong></article>
-              <article><span>${t('Changed')}</span><strong id="act-changed">—</strong></article>
-              <article><span>${t('Staged')}</span><strong id="act-staged">—</strong></article>
-              <article><span>${t('Events')}</span><strong id="act-events">—</strong></article>
-              <article><span>${t('Quality')}</span><strong id="act-quality">—</strong></article>
+          <div id="subview-source-workspace" class="subview active">
+            <div class="source-toolbar">
+              <p class="subview-desc">${t('Work with your repositories like SourceTree: stage, commit, diff, resolve conflicts, browse history, graph and review pull requests.')}</p>
+              <div id="gh-connect-area"></div>
             </div>
-            <div id="quality-strip" class="quality-strip"></div>
+            <div class="source-layout">
+              <div class="source-left">
+                <input id="source-filter" class="search-input source-filter" type="search" placeholder="${t('Filter repositories...')}">
+                <div id="source-repos" class="source-repos"></div>
+              </div>
+              <div id="source-detail" class="source-detail"></div>
+            </div>
           </div>
-
-          <div id="activity-subview-repos" class="subview">
+          <div id="subview-source-repositories" class="subview">
             <div class="activity-toolbar">
               <div>
                 <strong>${t('Tracked Git repositories')}</strong>
@@ -402,7 +377,7 @@ function switchView(view: string) {
   document.querySelectorAll('.nav-btn, .view').forEach(el => el.classList.remove('active'))
   document.querySelector(`.nav-btn[data-view="${view}"]`)?.classList.add('active')
   document.getElementById(`${view}-view`)?.classList.add('active')
-  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), activity: t('Activity'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security') }
+  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security') }
   document.getElementById('view-title')!.textContent = titles[view] || view
   closeServiceInspector()
 
@@ -445,6 +420,12 @@ function switchView(view: string) {
 
 }
 
+function selectSourceSubtab(subtab: string): void {
+  document.querySelectorAll('#source-subtabs .subtab, #source-view > .subview').forEach(el => el.classList.remove('active'))
+  document.querySelector(`#source-subtabs .subtab[data-source-subtab="${subtab}"]`)?.classList.add('active')
+  document.getElementById(`subview-source-${subtab}`)?.classList.add('active')
+}
+
 // Re-translates the app-shell chrome built once in renderApp() (nav labels,
 // header, subview descriptions, subtabs) by patching existing elements'
 // text/title/placeholder in place — never touching innerHTML/removing
@@ -471,7 +452,7 @@ function applyLocaleToShell(): void {
   setText('.brand small', t('Developer Control Center'))
 
   const navLabels: Record<string, string> = {
-    overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), activity: t('Activity'),
+    overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'),
     resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'),
     security: t('Security'),
   }
@@ -511,19 +492,11 @@ function applyLocaleToShell(): void {
   setText('#subview-jobs > .subview-desc', t('Background jobs from Docker workers, cron, launchd, and PM2.'))
 
   setText('#source-view .subview-desc', t('Work with your repositories like SourceTree: stage, commit, diff, resolve conflicts, browse history, graph and review pull requests.'))
+  setText('#source-subtabs .subtab[data-source-subtab="workspace"]', t('Workspace'))
+  setText('#source-subtabs .subtab[data-source-subtab="repositories"]', t('Repositories'))
   const sourceFilter = document.getElementById('source-filter') as HTMLInputElement | null
   if (sourceFilter) sourceFilter.placeholder = t('Filter repositories...')
 
-  setText('#activity-subtabs .subtab[data-activity-subtab="timeline"]', t('Timeline'))
-  setText('#activity-subtabs .subtab[data-activity-subtab="week"]', t('This week'))
-  setText('#activity-subtabs .subtab[data-activity-subtab="repos"]', t('Repositories'))
-  setText('#timeline-filters .subtab[data-timeline-filter="all"]', t('All'))
-  setText('#timeline-filters .subtab[data-timeline-filter="runtime"]', t('Runtime'))
-  setText('#activity-subview-week .section-title', t('This week across all repositories'))
-  const statKeys = ['Commits (7d)', 'Active Days', 'Ahead', 'Behind', 'Changed', 'Staged', 'Events', 'Quality']
-  document.querySelectorAll('#activity-subview-week .activity-stats article span').forEach((el, i) => {
-    if (statKeys[i]) el.textContent = t(statKeys[i])
-  })
   setText('.activity-toolbar strong', t('Tracked Git repositories'))
   setText('.activity-toolbar .switch-row span', t('My commits only'))
 
@@ -553,7 +526,6 @@ function applyLocaleToShell(): void {
     renderActivity()
     renderSourceView(activity)
   }
-  renderTimeline()
   renderSecurity()
   renderServers()
   renderTools()
@@ -854,7 +826,7 @@ async function loadServers(): Promise<void> {
 function renderServers(): void {
   renderServersView({
     servers, checks: serverChecks, keyWarnings: serverKeyWarnings, containers: serverContainers, cron: serverCron,
-    files: serverFiles, terminal: serverTerminal, showAddForm: showAddServerForm, editingServer, sshConfigHosts,
+    files: serverFiles, vpn: serverVPN, terminal: serverTerminal, showAddForm: showAddServerForm, editingServer, sshConfigHosts,
     selectedServers, bulkRun: serverBulkRun,
   })
   // The terminal panel re-renders its innerHTML on every state change like
@@ -1032,12 +1004,18 @@ async function promptFixKeyPermissionIfNeeded(id: string): Promise<void> {
 async function handleRemoveServer(id: string): Promise<void> {
   const server = servers.find(s => s.id === id)
   if (!(await api.confirmDialog(t('Remove server'), `${t('Remove')} "${server?.name || id}" ${t('from Thaloca? This only forgets it here — nothing changes on the server itself.')}`))) return
-  await api.removeServer(id)
+  try {
+    await api.removeServer(id)
+  } catch (error) {
+    showError(`${t('Could not remove server:')} ${String(error)}`)
+    return
+  }
   serverChecks.delete(id)
   serverKeyWarnings.delete(id)
   serverContainers.delete(id)
   serverCron.delete(id)
   serverFiles.delete(id)
+  serverVPN.delete(id)
   selectedServers.delete(id)
   serverBulkJobIds.delete(id)
   if (serverBulkRun) serverBulkRun = { ...serverBulkRun, jobs: serverBulkRun.jobs.filter(j => j.serverId !== id) }
@@ -1082,10 +1060,11 @@ async function handleFixServerKey(id: string): Promise<void> {
 // Containers, Cron, Files, and Terminal are views onto the same server row
 // — only one is shown at a time so opening one doesn't leave another's
 // panel stacked underneath it.
-function closeOtherServerPanels(id: string, except: 'containers' | 'cron' | 'files' | 'terminal'): void {
+function closeOtherServerPanels(id: string, except: 'containers' | 'cron' | 'files' | 'vpn' | 'terminal'): void {
   if (except !== 'containers') serverContainers.delete(id)
   if (except !== 'cron') serverCron.delete(id)
   if (except !== 'files') serverFiles.delete(id)
+  if (except !== 'vpn') serverVPN.delete(id)
   if (except !== 'terminal' && serverTerminal?.serverId === id) {
     serverTerminal = null
     void loadServerTerminalModule().then(m => m.closeServerTerminal())
@@ -1106,6 +1085,176 @@ async function toggleServerContainers(id: string): Promise<void> {
     serverContainers.set(id, { status: 'loaded', items })
   } catch (error) {
     serverContainers.set(id, { status: 'error', items: [], error: String(error) })
+  }
+  renderServers()
+}
+
+async function toggleServerVPN(id: string): Promise<void> {
+  if (serverVPN.has(id)) {
+    serverVPN.delete(id)
+    renderServers()
+    return
+  }
+  closeOtherServerPanels(id, 'vpn')
+  serverVPN.set(id, { status: null, engines: null, selectedEngine: null, editing: false, busy: '' })
+  renderServers()
+  try {
+    const [status, engines] = await Promise.all([api.serverVPNStatus(id), api.listVPNEngines()])
+    serverVPN.set(id, { status, engines, selectedEngine: null, editing: false, busy: '' })
+  } catch (error) {
+    serverVPN.set(id, { status: { configured: false, connected: false }, engines: [], selectedEngine: null, editing: false, busy: '', error: String(error) })
+  }
+  renderServers()
+}
+
+function handleServerVPNEditStart(id: string): void {
+  const current = serverVPN.get(id)
+  if (!current) return
+  // Replace keeps the currently configured protocol selected. A first-time
+  // Add immediately selects the first available engine, so its fields are
+  // ready without requiring an extra click; the persistent picker above the
+  // form still lets the user switch protocols at any time.
+  const server = servers.find(s => s.id === id)
+  const selectedEngine = current.status?.configured
+    ? server?.vpn_type || null
+    : current.engines?.find(engine => engine.installed)?.kind || null
+  serverVPN.set(id, { ...current, editing: true, selectedEngine, error: undefined })
+  renderServers()
+}
+
+function handleServerVPNEditCancel(id: string): void {
+  const current = serverVPN.get(id)
+  if (!current) return
+  serverVPN.set(id, { ...current, editing: false, selectedEngine: null, error: undefined })
+  renderServers()
+}
+
+function handleServerVPNSelectEngine(id: string, engineKind: string): void {
+  const current = serverVPN.get(id)
+  if (!current) return
+  serverVPN.set(id, { ...current, selectedEngine: engineKind, error: undefined })
+  renderServers()
+}
+
+// Installs a not-yet-installed engine's CLI tool right from the VPN
+// picker, via the same RunToolAction/confirm/poll flow the Tools tab uses
+// (desktop/toolActions.go) — the frontend never builds the actual install
+// command, only ever a (binary, "install") pair the backend looks up.
+let serverVPNInstallTimer: number | null = null
+
+async function handleServerVPNInstallEngine(id: string, binary: string, name: string, installCommand: string): Promise<void> {
+  const current = serverVPN.get(id)
+  if (!current || current.busy || current.installing?.running) return
+  if (!(await api.confirmDialog(`${t('Install')} ${name}`, `${t('Run this command now?')}\n\n${installCommand}`))) return
+
+  let jobID: string
+  try {
+    jobID = await api.runToolAction(binary, 'install')
+  } catch (error) {
+    serverVPN.set(id, { ...current, error: `${t('Could not start')} install ${t('for')} ${name}: ${String(error)}` })
+    renderServers()
+    return
+  }
+
+  serverVPN.set(id, { ...current, installing: { name, output: '', running: true, exitCode: 0 } })
+  renderServers()
+
+  if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
+  serverVPNInstallTimer = window.setInterval(async () => {
+    const status = await api.toolActionStatus(jobID)
+    const latest = serverVPN.get(id)
+    if (!latest) {
+      if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
+      serverVPNInstallTimer = null
+      return
+    }
+    serverVPN.set(id, { ...latest, installing: { name, output: status.output, running: status.running, exitCode: status.exit_code, error: status.error } })
+    renderServers()
+    if (!status.running) {
+      if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
+      serverVPNInstallTimer = null
+      // Refresh the engine list so the Installed flag (and the picker)
+      // reflects reality once the install finishes.
+      const engines = await api.listVPNEngines()
+      const refreshed = serverVPN.get(id)
+      if (refreshed) serverVPN.set(id, { ...refreshed, engines })
+      renderServers()
+    }
+  }, 700)
+}
+
+async function handleServerVPNSave(id: string, engineKind: string): Promise<void> {
+  const current = serverVPN.get(id)
+  if (!current || current.busy) return
+  const engine = current.engines?.find(e => e.kind === engineKind)
+  if (!engine) return
+
+  const inputs = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`[data-server-vpn-field="${CSS.escape(id)}"]`)
+  const values: Record<string, string> = {}
+  const fieldsByKey = new Map(engine.fields.map(field => [field.key, field]))
+  inputs.forEach(input => {
+    const key = input.dataset.vpnFieldKey || ''
+    // Passwords and keys are opaque bytes from the user's perspective:
+    // leading/trailing spaces may be intentional and must survive exactly.
+    values[key] = fieldsByKey.get(key)?.secret ? input.value : input.value.trim()
+  })
+  const missing = engine.fields.filter(f => f.required && !values[f.key]?.trim())
+  if (missing.length) {
+    serverVPN.set(id, { ...current, error: `${t('Missing required field(s):')} ${missing.map(f => t(f.label)).join(', ')}` })
+    renderServers()
+    return
+  }
+
+  serverVPN.set(id, { ...current, busy: 'saving', error: undefined })
+  renderServers()
+  try {
+    await api.setServerVPNConfig(id, engineKind, values)
+    const status = await api.serverVPNStatus(id)
+    serverVPN.set(id, { ...current, status, editing: false, selectedEngine: null, busy: '' })
+    const server = servers.find(s => s.id === id)
+    if (server) { server.vpn_enabled = status.configured; server.vpn_type = engineKind }
+  } catch (error) {
+    serverVPN.set(id, { ...current, busy: '', error: String(error) })
+  }
+  renderServers()
+}
+
+async function handleServerVPNConnectToggle(id: string, connected: boolean): Promise<void> {
+  const current = serverVPN.get(id)
+  if (!current || current.busy) return
+  const action = connected ? 'disconnect' : 'connect'
+  if (!(await api.confirmDialog(
+    connected ? t('Disconnect VPN') : t('Connect VPN'),
+    connected
+      ? t('Bring this server\'s VPN tunnel down? This will prompt for your Mac admin password.')
+      : t('Bring this server\'s VPN tunnel up? This will prompt for your Mac admin password.'),
+  ))) return
+  serverVPN.set(id, { ...current, busy: connected ? 'disconnecting' : 'connecting', error: undefined })
+  renderServers()
+  try {
+    if (connected) await api.disconnectServerVPN(id)
+    else await api.connectServerVPN(id)
+    const status = await api.serverVPNStatus(id)
+    serverVPN.set(id, { ...current, status, editing: false, selectedEngine: null, busy: '' })
+  } catch (error) {
+    serverVPN.set(id, { ...current, busy: '', error: `${action === 'connect' ? t('Could not connect:') : t('Could not disconnect:')} ${String(error)}` })
+  }
+  renderServers()
+}
+
+async function handleServerVPNRemove(id: string): Promise<void> {
+  const current = serverVPN.get(id)
+  if (!current || current.busy) return
+  if (!(await api.confirmDialog(t('Remove VPN config'), t("Delete this server's saved VPN config from disk? You can set it up again later.")))) return
+  serverVPN.set(id, { ...current, busy: 'removing', error: undefined })
+  renderServers()
+  try {
+    await api.removeServerVPNConfig(id)
+    serverVPN.set(id, { ...current, status: { configured: false, connected: false }, editing: false, selectedEngine: null, busy: '' })
+    const server = servers.find(s => s.id === id)
+    if (server) { server.vpn_enabled = false; server.vpn_type = undefined }
+  } catch (error) {
+    serverVPN.set(id, { ...current, busy: '', error: String(error) })
   }
   renderServers()
 }
@@ -1422,11 +1571,6 @@ function bindEvents() {
   initSettingsPanel()
   initClipboardHistoryPanel()
   document.addEventListener('thaloca:refresh', () => { void refreshRuntime() })
-  // views/timeline.ts dispatches this instead of calling switchView/
-  // loadRepoTab/openServiceInspector directly, for the same reason as above.
-  document.addEventListener(TIMELINE_NAVIGATE_EVENT, event => {
-    navigateToTimelineTarget((event as CustomEvent<TimelineRow>).detail)
-  })
   // views/sourceControl.ts dispatches this after a fetch/pull/push/stash —
   // ahead/behind/changed counts live in `activity`, owned here.
   document.addEventListener(ACTIVITY_REFRESH_EVENT, () => { void loadActivity() })
@@ -1438,6 +1582,10 @@ function bindEvents() {
   // Source Control repo filter (static input, so typing never loses focus)
   document.getElementById('source-filter')?.addEventListener('input', event => {
     setSourceFilter((event.target as HTMLInputElement).value)
+  })
+
+  document.querySelectorAll('#source-subtabs .subtab').forEach(btn => {
+    btn.addEventListener('click', () => selectSourceSubtab(btn.getAttribute('data-source-subtab') || 'workspace'))
   })
 
   // Security tab's scan-all-repos progress (see desktop/security.go's
@@ -1512,25 +1660,6 @@ function bindEvents() {
     })
   })
 
-  // Sub-tabs inside Activity (Timeline vs This week)
-  document.querySelectorAll('#activity-subtabs .subtab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#activity-subtabs .subtab, #activity-view .subview').forEach(el => el.classList.remove('active'))
-      btn.classList.add('active')
-      document.getElementById(`activity-subview-${btn.getAttribute('data-activity-subtab')}`)!.classList.add('active')
-    })
-  })
-
-  // Timeline category filter inside Activity
-  document.querySelectorAll('#timeline-filters .subtab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#timeline-filters .subtab').forEach(el => el.classList.remove('active'))
-      btn.classList.add('active')
-      timelineFilter = (btn.getAttribute('data-timeline-filter') || 'all') as typeof timelineFilter
-      renderTimeline()
-    })
-  })
-
   // Initial load
   loadAll()
   // Splash screen is capped to a short fixed duration rather than tied to
@@ -1565,7 +1694,7 @@ async function loadAll() {
 
   try {
     // Services scan and git activity are independent — run them together
-    // so the Activity dashboard is not stuck behind the runtime scan.
+    // so Source Control's repository overview is not stuck behind the runtime scan.
     void refreshGHStatus()
     // force=true: this is the header's manual Refresh (and the initial
     // app-load call) — a repo cloned moments ago should show up right
@@ -1580,10 +1709,27 @@ async function loadAll() {
 }
 
 let runtimeInFlight: Promise<void> | null = null
+let runtimeInFlightForce = false
 
 function loadRuntime(force = false): Promise<void> {
   if (!runtimeInFlight) {
-    runtimeInFlight = doLoadRuntime(force).finally(() => { runtimeInFlight = null })
+    runtimeInFlightForce = force
+    const scan: Promise<void> = doLoadRuntime(force).finally(() => { if (runtimeInFlight === scan) runtimeInFlight = null })
+    runtimeInFlight = scan
+    return scan
+  }
+  if (force && !runtimeInFlightForce) {
+    // A force=true request (manual Refresh) must not be satisfied by the
+    // non-forced background scan already running — that would silently keep
+    // the 5-minute repo-path cache the caller asked to bypass. Chain a
+    // forced scan after the current one instead.
+    runtimeInFlightForce = true
+    const chained: Promise<void> = runtimeInFlight
+      .catch(() => { /* previous scan errors are already shown */ })
+      .then(() => doLoadRuntime(true))
+      .finally(() => { if (runtimeInFlight === chained) runtimeInFlight = null })
+    runtimeInFlight = chained
+    return chained
   }
   return runtimeInFlight
 }
@@ -1684,13 +1830,10 @@ async function doLoadRuntime(force: boolean) {
   await checkAllHealth()
   renderServices()
 
-  // Runtime/health/action events recorded during this scan (in-memory only,
-  // see App.RecentEvents in desktop/app.go).
-  await loadTimeline()
 }
 
 // Overview's Runtime/Source summary lines are derived from data already
-// loaded for the Runtime view and the Activity dashboard — never triggers
+// loaded for the Runtime view and Source Control — never triggers
 // its own scan.
 function renderOverview(): void {
   renderOverviewView(overview, { services, ports, jobs, activity })
@@ -1701,7 +1844,7 @@ function rebuildCommandIndex(): void {
     { id: 'view:overview', label: `${t('Go to')} ${t('Overview')}`, kind: 'view', run: () => switchView('overview') },
     { id: 'view:runtime', label: `${t('Go to')} ${t('Runtime')}`, kind: 'view', run: () => switchView('runtime') },
     { id: 'view:source', label: `${t('Go to')} ${t('Source Control')}`, kind: 'view', run: () => switchView('source') },
-    { id: 'view:activity', label: `${t('Go to')} ${t('Activity')}`, kind: 'view', run: () => switchView('activity') },
+    { id: 'view:repositories', label: `${t('Go to')} ${t('Repositories')}`, kind: 'view', run: () => { switchView('source'); selectSourceSubtab('repositories') } },
     { id: 'view:resources', label: `${t('Go to')} ${t('Resources')}`, kind: 'view', run: () => switchView('resources') },
     { id: 'view:tools', label: `${t('Go to')} ${t('Tools')}`, kind: 'view', run: () => switchView('tools') },
     { id: 'view:servers', label: `${t('Go to')} ${t('Servers')}`, kind: 'view', run: () => switchView('servers') },
@@ -1742,7 +1885,7 @@ function rebuildCommandIndex(): void {
     label: `${t('Open repo:')} ${r.name}`,
     hint: r.branch,
     kind: 'action',
-    run: () => { switchView('source'); void openRepoInSourceControl(r.path) },
+    run: () => { switchView('source'); selectSourceSubtab('workspace'); void openRepoInSourceControl(r.path) },
   }))
   const serverItems: CommandItem[] = servers.flatMap(s => [
     {
@@ -1768,7 +1911,6 @@ async function loadActivity(force = false) {
   renderActivity()
   renderSourceView(activity)
   renderOverview()
-  renderTimeline()
   renderSecurity()
   rebuildCommandIndex()
 }
@@ -1782,9 +1924,9 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install]')
   if (!button) {
-    // Activity dashboard: clicking a repo expands its recent commits/events
+    // Source Control's Repositories tab: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
     // is still there for when the user actually wants to work on it.
     const repoOpen = target?.closest<HTMLElement>('[data-open-source]')
@@ -1797,6 +1939,7 @@ async function handleDocumentClick(event: Event) {
     const sourceJump = target?.closest<HTMLElement>('[data-activity-open-source]')
     if (sourceJump?.dataset.activityOpenSource) {
       switchView('source')
+      selectSourceSubtab('workspace')
       await openRepoInSourceControl(sourceJump.dataset.activityOpenSource)
       return
     }
@@ -1935,6 +2078,51 @@ async function handleDocumentClick(event: Event) {
 
   if (button.dataset.serverFileDownload) {
     await handleServerFileDownload(button.dataset.serverFileDownload, button.dataset.fileName || '')
+    return
+  }
+
+  if (button.dataset.serverVpnToggle) {
+    await toggleServerVPN(button.dataset.serverVpnToggle)
+    return
+  }
+
+  if (button.dataset.serverVpnEditStart) {
+    handleServerVPNEditStart(button.dataset.serverVpnEditStart)
+    return
+  }
+
+  if (button.dataset.serverVpnEditCancel) {
+    handleServerVPNEditCancel(button.dataset.serverVpnEditCancel)
+    return
+  }
+
+  if (button.dataset.serverVpnSelectEngine) {
+    handleServerVPNSelectEngine(button.dataset.serverVpnSelectEngine, button.dataset.vpnEngine || '')
+    return
+  }
+
+  if (button.dataset.serverVpnInstallEngine) {
+    await handleServerVPNInstallEngine(
+      button.dataset.serverVpnInstallEngine,
+      button.dataset.vpnBinary || '',
+      button.dataset.vpnName || button.dataset.vpnBinary || '',
+      button.dataset.vpnInstallCommand || '',
+    )
+    return
+  }
+
+  if (button.dataset.serverVpnSave) {
+    await handleServerVPNSave(button.dataset.serverVpnSave, button.dataset.vpnEngine || '')
+    return
+  }
+
+  if (button.dataset.serverVpnConnectToggle) {
+    await handleServerVPNConnectToggle(button.dataset.serverVpnConnectToggle, button.dataset.vpnConnected === '1')
+    return
+  }
+
+  if (button.dataset.serverVpnRemove) {
+    await handleServerVPNRemove(button.dataset.serverVpnRemove)
     return
   }
 
@@ -2156,6 +2344,10 @@ async function handleDocumentClick(event: Event) {
   }
 
   if (button.dataset.openHomebrewInstall !== undefined) {
+    if (!(await api.confirmDialog(
+      t('Install Homebrew'),
+      t('Open Terminal and run Homebrew\'s official installer now? The installer may ask for your password and confirmation.'),
+    ))) return
     try {
       await api.openHomebrewInstallInTerminal()
     } catch (error) {
@@ -2197,6 +2389,9 @@ async function handleDocumentClick(event: Event) {
     if (!(await api.confirmDialog(t('Compose down'), `${t('Run docker compose down on')} "${project}"? ${t('This stops AND removes its containers (volumes are kept).')}`))) return
     const targets = normalizeServices(services).filter(s => s.source === 'docker'
       && (s.project || 'standalone containers') === project && s.container_id)
+    // See closeContainerTerminalIfOpen's doc comment — compose down removes
+    // these containers outright.
+    for (const svc of targets) closeContainerTerminalIfOpen(svc.container_id)
     for (const svc of targets) pendingContainers.set(svc.container_id, 'removing')
     pendingProjects.set(project, 'removing')
     button.disabled = true
@@ -2213,11 +2408,7 @@ async function handleDocumentClick(event: Event) {
   }
 
   if (button.dataset.terminalContainer) {
-    try {
-      await api.openContainerTerminal(button.dataset.terminalContainer)
-    } catch (error) {
-      showError(String(error))
-    }
+    await toggleContainerTerminal(button.dataset.terminalContainer)
     return
   }
 
@@ -2330,6 +2521,9 @@ async function handleProjectAction(button: HTMLButtonElement) {
   }
 
   const pendingLabel = isStart ? 'starting' : isRestart ? 'restarting' : 'stopping'
+  // See closeContainerTerminalIfOpen's doc comment — same reasoning applies
+  // to a whole project's containers being stopped/restarted at once.
+  if (!isStart) for (const svc of targets) closeContainerTerminalIfOpen(svc.container_id)
   for (const svc of targets) pendingContainers.set(svc.container_id, pendingLabel)
   // Also tracked at the project level so the header (Start all/Stop all/...)
   // visibly shows progress even while the project's containers are
@@ -2363,11 +2557,13 @@ async function handleContainerOrProcessAction(button: HTMLButtonElement) {
       await api.startContainer(containerID)
     } else if (button.dataset.restartContainer) {
       if (!(await api.confirmDialog(t('Restart container'), t('Restart this container?')))) return
+      closeContainerTerminalIfOpen(containerID)
       pendingContainers.set(containerID, 'restarting')
       renderServices()
       await api.restartContainer(containerID)
     } else if (button.dataset.stopContainer) {
       if (!(await api.confirmDialog(t('Stop container'), t('Stop this container?')))) return
+      closeContainerTerminalIfOpen(containerID)
       pendingContainers.set(containerID, 'stopping')
       renderServices()
       await api.stopContainer(containerID)
@@ -2443,7 +2639,63 @@ async function handleDocumentChange(event: Event) {
 // rendering lives in views/runtime.ts (data-in, no closure over this
 // module's state — see that file's header comment).
 function renderServices(): void {
-  renderServicesView({ services, ports, jobs, dockerStatus, searchQuery, healthCache, pendingContainers, jobLogs, projectLogs, processLogs, pendingProjects, imageScans: containerImageScans })
+  renderServicesView({
+    services, ports, jobs, dockerStatus, searchQuery, healthCache, pendingContainers, jobLogs, projectLogs,
+    processLogs, pendingProjects, imageScans: containerImageScans, terminals: containerTerminals,
+  })
+  // Same re-parenting trick as renderServers' server terminal: each open
+  // container terminal's xterm.js instance lives outside this render cycle,
+  // so reattach it into whatever mount point this render just produced
+  // instead of losing scrollback to a freshly recreated session.
+  for (const containerId of containerTerminals.keys()) {
+    const mount = document.querySelector<HTMLElement>(`[data-container-terminal-mount="${CSS.escape(containerId)}"]`)
+    if (mount) void loadContainerTerminalModule().then(m => m.reattachContainerTerminal(containerId, mount))
+  }
+}
+
+// Stopping/restarting/removing a container kills whatever shell
+// `docker exec` had open inside it, but the backend only notices once the
+// dead PTY read actually errors out — which can lag well behind the
+// action's own UI feedback. Closing the panel proactively here, at the same
+// moment the action is confirmed, keeps it from lingering on screen showing
+// a session that's already gone.
+function closeContainerTerminalIfOpen(containerId: string): void {
+  if (!containerTerminals.has(containerId)) return
+  containerTerminals.delete(containerId)
+  void loadContainerTerminalModule().then(m => m.closeContainerTerminal(containerId))
+}
+
+async function toggleContainerTerminal(containerId: string): Promise<void> {
+  if (containerTerminals.has(containerId)) {
+    containerTerminals.delete(containerId)
+    renderServices()
+    await (await loadContainerTerminalModule()).closeContainerTerminal(containerId)
+    return
+  }
+
+  const entry: { status: ContainerTerminalStatus; detail?: string } = { status: 'connecting' }
+  containerTerminals.set(containerId, entry)
+  renderServices()
+
+  const terminalModule = await loadContainerTerminalModule()
+  // A second click while the module was still loading already toggled this
+  // terminal back off — opening now would create a session nothing owns.
+  if (containerTerminals.get(containerId) !== entry) return
+  // Query the mount only after the await: renders during it may have
+  // replaced the element that existed beforehand.
+  const mount = document.querySelector<HTMLElement>(`[data-container-terminal-mount="${CSS.escape(containerId)}"]`)
+  if (!mount) return
+  await terminalModule.openContainerTerminal(containerId, mount, (status: ContainerTerminalStatus, detail?: string) => {
+    if (containerTerminals.get(containerId) !== entry) return
+    entry.status = status
+    entry.detail = detail
+    renderServices()
+  })
+  if (containerTerminals.get(containerId) !== entry) {
+    // Toggled off mid-open (during the docker exec round-trip): the panel is
+    // already gone, but the backend session now exists — close it for real.
+    void terminalModule.closeContainerTerminal(containerId)
+  }
 }
 function renderEngineCard(): void {
   renderRuntimeEngineCard(containerRuntimeStatus, engineActionBusy)
@@ -2474,50 +2726,6 @@ async function checkAllHealth(): Promise<void> {
   await checkAllHealthRuntime(services, healthCache)
 }
 
-async function loadTimeline() {
-  timelineEvents = await api.recentEvents(50)
-  renderTimeline()
-}
-
-function renderTimeline(): void {
-  renderTimelineView(timelineEvents, activity, timelineFilter)
-}
-
-// Clicking a timeline row jumps to the view that owns that kind of object,
-// per the ownership chosen when Runtime/Source Control were split apart:
-// runtime targets open in Runtime (Service Inspector when a match is still
-// discovered), git targets open the repo in Source Control.
-function navigateToTimelineTarget(row: TimelineRow) {
-  if (row.category === 'git' && row.targetId) {
-    switchView('source')
-    void openRepoInSourceControl(row.targetId)
-    return
-  }
-  if (row.category === 'health' && row.targetId) {
-    switchView('runtime')
-    const svc = normalizeServices(services).find(s => s.health_url === row.targetId)
-    if (svc) openServiceInspector(svc)
-    return
-  }
-  if (row.targetType === 'job') {
-    switchView('runtime')
-    document.querySelector<HTMLElement>('#services-subtabs .subtab[data-subtab="jobs"]')?.click()
-    return
-  }
-  if (row.targetType === 'port') {
-    switchView('runtime')
-    document.querySelector<HTMLElement>('#services-subtabs .subtab[data-subtab="ports"]')?.click()
-    return
-  }
-  if (row.targetType === 'container' && row.targetId) {
-    switchView('runtime')
-    const svc = normalizeServices(services).find(s => s.container_id === row.targetId)
-    if (svc) openServiceInspector(svc)
-    return
-  }
-  switchView('runtime')
-}
-
 // Overview's per-project "Runtime" button jumps straight to that Docker
 // Compose group instead of a single service's inspector. Overview and
 // Runtime bucket project-less services under different labels (see
@@ -2534,15 +2742,6 @@ function navigateToProjectInRuntime(project: string): void {
 
 function renderActivity() {
   if (!activity) return
-
-  document.getElementById('act-commits')!.textContent = String(activity.commit_count)
-  document.getElementById('act-days')!.textContent = String(activity.active_days)
-  document.getElementById('act-ahead')!.textContent = String(activity.ahead)
-  document.getElementById('act-behind')!.textContent = String(activity.behind)
-  document.getElementById('act-changed')!.textContent = String(activity.changed_files)
-  document.getElementById('act-staged')!.textContent = String(activity.staged_files)
-  document.getElementById('act-events')!.textContent = String(activity.event_count)
-  document.getElementById('act-quality')!.textContent = activity.quality_score ? String(activity.quality_score) : '—'
 
   const identity = document.getElementById('activity-identity')!
   const identities = activity.identities || []
@@ -2564,19 +2763,7 @@ function renderActivity() {
     note.classList.remove('visible')
   }
 
-  renderQualityStrip(activity)
   renderRepositories(activity.repositories || [])
-}
-
-function renderQualityStrip(activity: ActivitySummary) {
-  const container = document.getElementById('quality-strip')!
-  container.innerHTML = `
-    <article><span>${t('Feat')}</span><strong>${activity.feature_commits}</strong></article>
-    <article><span>${t('Fix')}</span><strong>${activity.fix_commits}</strong></article>
-    <article><span>${t('Docs')}</span><strong>${activity.docs_commits}</strong></article>
-    <article><span>${t('Chore/Test')}</span><strong>${activity.chore_commits}</strong></article>
-    <article><span>${t('Merge')}</span><strong>${activity.merge_commits}</strong></article>
-  `
 }
 
 function renderRepositories(repositories: RepositoryActivity[]) {

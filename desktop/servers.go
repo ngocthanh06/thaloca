@@ -32,6 +32,14 @@ type ServerConnection struct {
 	// (ssh -J), for servers only reachable via a jump host. Empty means
 	// connect directly.
 	ProxyJump string `json:"proxy_jump,omitempty"`
+	// VPNEnabled is true once a VPN config has been saved for this server,
+	// and VPNType names which engine (see serverVPN.go's vpnEngines
+	// registry, e.g. "wireguard"/"openvpn"). The config itself — it
+	// commonly holds a private key or password — is never stored here; it
+	// lives in its own file(s) under ~/.thaloca/vpn/, the same "path/flag
+	// only, never the secret" pattern KeyPath already uses for SSH keys.
+	VPNEnabled bool   `json:"vpn_enabled,omitempty"`
+	VPNType    string `json:"vpn_type,omitempty"`
 }
 
 type serverStore struct {
@@ -174,6 +182,8 @@ func (a *App) UpdateServer(id, name, host string, port int, user, keyPath, envir
 				KeyPath:     keyPath,
 				Environment: environment,
 				ProxyJump:   proxyJump,
+				VPNEnabled:  s.VPNEnabled,
+				VPNType:     s.VPNType,
 			}
 			updated = servers[i]
 			found = true
@@ -190,14 +200,31 @@ func (a *App) UpdateServer(id, name, host string, port int, user, keyPath, envir
 }
 
 // RemoveServer deletes a saved connection. This only forgets Thaloca's own
-// reference to the key path; it never touches the key file itself.
+// reference to the key path; it never touches the key file itself. Its VPN
+// config (see serverVPN.go), if any, is file(s) Thaloca itself created —
+// unlike the SSH key, those are cleaned up here so a removed server
+// doesn't leave an orphaned private key/password behind. Refuses while its
+// VPN is still connected — same check RemoveServerVPNConfig already makes
+// — since deleting the config out from under a live tunnel would leave the
+// WireGuard interface or root openvpn process running with nothing left
+// that could ever disconnect it again.
 func (a *App) RemoveServer(id string) error {
 	servers := loadServers()
 	filtered := make([]ServerConnection, 0, len(servers))
 	for _, s := range servers {
 		if s.ID != id {
 			filtered = append(filtered, s)
+			continue
 		}
+		if e, ok := vpnEngines[s.VPNType]; ok && e.connected(id) {
+			return fmt.Errorf("disconnect the VPN before removing this server")
+		}
+	}
+	// A failed VPN cleanup must fail the whole removal: silently dropping the
+	// server record while its private key/password files stayed on disk would
+	// leave secrets behind with no way left in the UI to clean them up.
+	if err := removeVPNFiles(id); err != nil {
+		return fmt.Errorf("could not remove this server's VPN config files: %w", err)
 	}
 	return saveServers(filtered)
 }

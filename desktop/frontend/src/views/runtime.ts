@@ -8,6 +8,7 @@
 // the markup.
 import { api, normalizeServices, normalizeJobs, normalizePorts } from '../api'
 import type { Service, PortUsage, Job, HealthStatus, SecurityReport, ContainerRuntimeStatus } from '../api'
+import type { ContainerTerminalStatus } from '../containerTerminal'
 import { escapeHTML, getSourceBadgeClass, matchesSearch } from '../dom'
 import { groupFindings, renderFindingGroup, renderScannerStatusRow } from './security'
 import { t } from '../i18n'
@@ -31,6 +32,11 @@ export interface RuntimeContext {
   // flight, the report once it's done. See "Scan image" in
   // renderContainerRow / data-container-scan-image in main.ts.
   imageScans: Map<string, SecurityReport | 'scanning'>
+  // Keyed by container ID — present while that container's embedded
+  // terminal panel is open. Several containers may each have one open at
+  // once (see ../containerTerminal.ts's header comment for why), unlike the
+  // Servers tab's single app-wide SSH terminal.
+  terminals: Map<string, { status: ContainerTerminalStatus; detail?: string }>
 }
 
 // Which Docker Compose project groups are expanded — purely a Runtime-view
@@ -204,6 +210,7 @@ function renderContainerRow(svc: Service, ctx: RuntimeContext): string {
   const logs = svc.container_id ? ctx.jobLogs.get(svc.container_id) : undefined
   const imageScan = svc.container_id ? ctx.imageScans.get(svc.container_id) : undefined
   const image = escapeHTML(svc.image || '')
+  const terminal = svc.container_id ? ctx.terminals.get(svc.container_id) : undefined
   return `
     <article class="container-row ${stopped ? 'stopped' : ''} ${pending ? 'pending' : ''}">
       <span class="status-dot status-${escapeHTML(stateClass || 'unknown')}"></span>
@@ -223,13 +230,30 @@ function renderContainerRow(svc: Service, ctx: RuntimeContext): string {
           ${stopped
             ? `<button class="repo-action" data-start-container="${id}">${t('Start')}</button>`
             : `
-              <button class="repo-action" data-terminal-container="${id}">${t('Terminal')}</button>
+              <button class="repo-action" data-terminal-container="${id}">${terminal ? t('Hide terminal') : t('Terminal')}</button>
               <button class="repo-action" data-restart-container="${id}">${t('Restart')}</button>
               <button class="repo-action danger" data-stop-container="${id}">${t('Stop')}</button>`}`}
       </span>
       ${logs !== undefined ? `<pre class="job-log row-log">${escapeHTML(logs)}</pre>` : ''}
       ${imageScan && imageScan !== 'scanning' ? renderImageScanPanel(svc.image || '', imageScan) : ''}
+      ${terminal ? renderContainerTerminalPanel(id, terminal) : ''}
     </article>`
+}
+
+// Embedded PTY terminal panel for one container — mirrors servers.ts's
+// renderTerminalPanel (same CSS classes), mounted via
+// data-container-terminal-mount and reattached by main.ts's renderServices
+// after each render (see ../containerTerminal.ts).
+function renderContainerTerminalPanel(containerId: string, state: { status: ContainerTerminalStatus; detail?: string }): string {
+  const statusLabel = state.status === 'connecting' ? t('Connecting…') : state.status === 'open' ? t('Connected') : t('Closed')
+  return `
+    <div class="server-terminal">
+      <div class="server-terminal-toolbar">
+        <span class="resource-detail server-terminal-status server-terminal-status-${state.status}">${statusLabel}</span>
+        ${state.detail ? `<span class="resource-detail tool-action-failed">${escapeHTML(state.detail)}</span>` : ''}
+      </div>
+      <div class="server-terminal-surface" data-container-terminal-mount="${containerId}"></div>
+    </div>`
 }
 
 function renderImageScanPanel(image: string, report: SecurityReport): string {

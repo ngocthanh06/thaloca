@@ -84,6 +84,10 @@ var toolSpecs = []toolSpec{
 	{"gosec", "gosec", []string{"--version"}},
 	{"Semgrep", "semgrep", []string{"--version"}},
 	{"ClamAV", "clamscan", []string{"--version"}},
+	// WireGuard and OpenVPN (used by the Servers view's per-server VPN
+	// panel, see serverVPN.go) are deliberately NOT listed here — Thaloca
+	// bundles its own copy of both (see vpnbin.go), so there's nothing to
+	// detect/install for either.
 }
 
 // manifestRequirements is the simple 1-file-to-1-tool part of project

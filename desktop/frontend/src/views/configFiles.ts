@@ -54,7 +54,13 @@ async function toggle(entry: ConfigFileEntry): Promise<void> {
       // actually happens.
       message = `${t('Disable')} ${entry.name}${scope}? ${entry.description} ${t('This renames it to')} "${entry.name}.disabled" ${t('on disk — nothing is deleted, and you can enable it again the same way.')}`
     }
-    if (!(await api.confirmDialog(t('Disable config file'), message))) return
+    if (!(await api.confirmDialog(t('Disable config file'), message))) {
+      // The native checkbox has already flipped before its change handler
+      // runs. Re-render from the unchanged entry state so Cancel leaves the
+      // control visibly enabled as well as leaving the file untouched.
+      renderConfigFilesView()
+      return
+    }
   }
   togglingID = entry.id
   renderConfigFilesView()

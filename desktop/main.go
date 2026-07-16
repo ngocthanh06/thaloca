@@ -26,7 +26,7 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup: func(ctx context.Context) {
 			app.Startup(ctx)
-			setupMenuBar()
+			setupMenuBar(app)
 		},
 		OnShutdown: app.Shutdown,
 		Bind:       []interface{}{app},

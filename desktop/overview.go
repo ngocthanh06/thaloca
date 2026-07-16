@@ -79,11 +79,28 @@ type serviceScanState struct {
 // (a repo cloned moments ago should show up immediately), false for the
 // background auto-refresh.
 func (a *App) Snapshot(force bool) Snapshot {
+	// The two slow discovery sources — Docker (its contexts are scanned
+	// sequentially, so a hung daemon can eat its whole deadline) and the
+	// local process scan — run in parallel, each under its own 15-second
+	// deadline. A slow Docker daemon therefore neither hides local services
+	// (which an expired shared context used to) nor stretches a refresh to
+	// the sum of both timeouts.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	dockerServices, dockerContextStatuses, dockerErr := discovery.ScanDocker(ctx)
+	var dockerServices []discovery.Service
+	var dockerContextStatuses []discovery.DockerContextStatus
+	var dockerErr error
+	dockerDone := make(chan struct{})
+	go func() {
+		defer close(dockerDone)
+		dockerCtx, cancelDocker := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancelDocker()
+		dockerServices, dockerContextStatuses, dockerErr = discovery.ScanDocker(dockerCtx)
+	}()
 	repoPaths := a.cachedRepoPaths(force)
-	services, dockerStatus := discoverAll(ctx, repoPaths, dockerServices, dockerContextStatuses, dockerErr)
+	procServices, _ := discovery.ScanProcesses(ctx)
+	<-dockerDone
+	services, dockerStatus := discoverAll(repoPaths, procServices, dockerServices, dockerContextStatuses, dockerErr)
 	ports := discoverPorts(ctx, dockerServices)
 	jobs := discoverJobs(ctx, dockerServices)
 	a.diffPortEvents(ports)

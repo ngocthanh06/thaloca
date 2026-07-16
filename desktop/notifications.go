@@ -85,7 +85,16 @@ func (a *App) GetNotificationSettings() NotificationSettings {
 
 // SetNotificationSettings persists new notification preferences.
 func (a *App) SetNotificationSettings(settings NotificationSettings) error {
-	return saveNotificationSettings(settings)
+	if err := saveNotificationSettings(settings); err != nil {
+		return err
+	}
+	// If notifications were disabled at launch, ask macOS for permission at
+	// the moment the user explicitly enables them instead of prompting while
+	// the feature is switched off.
+	if settings.Enabled {
+		go a.requestNotificationAuthorization()
+	}
+	return nil
 }
 
 // isQuietHours reports whether `now` falls in the configured quiet window,
@@ -157,7 +166,18 @@ func (a *App) notifyOnce(key, eventType, title, message string) {
 	}
 	a.notifyMu.Unlock()
 
-	_ = a.Notify(title, message)
+	if err := a.Notify(title, message); err != nil {
+		// The send failed (most commonly: notification permission not granted
+		// yet) — undo the cooldown recorded above so the still-ongoing problem
+		// retries on the next detection instead of being silenced for
+		// notifyCooldown. Recording first and undoing here (rather than only
+		// recording after success) keeps concurrent callers from double-sending.
+		a.notifyMu.Lock()
+		if recorded, ok := a.notifyLast[key]; ok && recorded.Equal(now) {
+			delete(a.notifyLast, key)
+		}
+		a.notifyMu.Unlock()
+	}
 }
 
 func eventTypeEnabled(settings NotificationSettings, eventType string) bool {

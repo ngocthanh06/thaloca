@@ -79,8 +79,9 @@ type App struct {
 
 	// notifyLast throttles native notifications per problem key (see
 	// desktop/notifications.go's notifyOnce).
-	notifyMu   sync.Mutex
-	notifyLast map[string]time.Time
+	notifyMu           sync.Mutex
+	notifyLast         map[string]time.Time
+	notificationsReady bool
 
 	// serverReachable tracks each saved server's last-known SSH
 	// reachability so pollServerReachability can notify only on a
@@ -143,6 +144,16 @@ type App struct {
 	terminalsMu sync.Mutex
 	terminals   map[string]*terminalSession
 
+	// containerTerminals holds live PTY-backed `docker exec` sessions
+	// started via OpenContainerTerminal, keyed by session ID (see
+	// desktop/containerTerminal.go). Unlike terminals above (capped at one
+	// app-wide), each container caps at one session but different
+	// containers run independently and concurrently — a container's own
+	// long-running command (e.g. `npm run dev`) shouldn't force closing its
+	// terminal just because another container's terminal opens.
+	containerTerminalsMu sync.Mutex
+	containerTerminals   map[string]*containerTerminalSession
+
 	// appsCache holds installed .app bundles' static metadata (see
 	// apps.go) — like toolsCache/gpuCache, only re-scanned via
 	// RefreshInstalledApps rather than on every Resources poll. appsCached
@@ -181,6 +192,19 @@ func fixPathForGUILaunch() {
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Use Wails' in-process UNUserNotificationCenter integration so macOS
+	// attributes notifications to Thaloca.app (including its bundle icon).
+	// AppleScript's `display notification` attributes them to Script Editor /
+	// osascript instead, which is why the wrong pen-and-scroll icon appeared.
+	if runtime.GOOS == "darwin" {
+		if err := wailsruntime.InitializeNotifications(ctx); err == nil {
+			a.notificationsReady = true
+			if loadNotificationSettings().Enabled {
+				go a.requestNotificationAuthorization()
+			}
+		}
+	}
 
 	// A GUI app launched from Finder/Dock (as opposed to `wails dev` from a
 	// terminal) is started by launchd with a minimal PATH that omits
@@ -232,9 +256,14 @@ func (a *App) Startup(ctx context.Context) {
 // Shutdown runs on a real app quit (Cmd+Q / Dock Quit) — NOT on the window's
 // close button, which only hides the window (see HideWindowOnClose in
 // main.go) so background scanning keeps running. It closes any live server
-// terminal sessions so no `ssh` subprocess is left orphaned.
+// and container terminal sessions so no `ssh`/`docker exec` subprocess is
+// left orphaned.
 func (a *App) Shutdown(ctx context.Context) {
 	a.closeAllServerTerminals()
+	a.closeAllContainerTerminals()
+	if a.notificationsReady {
+		wailsruntime.CleanupNotifications(ctx)
+	}
 }
 
 // Discover, DiscoverPorts, DiscoverJobs, and Overview used to live here as
@@ -260,15 +289,27 @@ func (a *App) Confirm(title, message string) bool {
 	return result == "Yes"
 }
 
-// Notify sends a macOS native notification
+// Notify sends a native notification owned by Thaloca.app, so Notification
+// Center uses the app's real name, bundle identifier, and icon.
 func (a *App) Notify(title, message string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("notifications only supported on macOS")
 	}
-	escape := func(s string) string { return strings.ReplaceAll(s, `"`, `\"`) }
-	script := fmt.Sprintf(`display notification "%s" with title "%s"`, escape(message), escape(title))
-	cmd := exec.Command("osascript", "-e", script)
-	return cmd.Run()
+	if !a.notificationsReady {
+		return fmt.Errorf("notifications are not available")
+	}
+	return wailsruntime.SendNotification(a.ctx, wailsruntime.NotificationOptions{
+		ID:    fmt.Sprintf("thaloca-%d", time.Now().UnixNano()),
+		Title: title,
+		Body:  message,
+	})
+}
+
+func (a *App) requestNotificationAuthorization() {
+	if !a.notificationsReady {
+		return
+	}
+	_, _ = wailsruntime.RequestNotificationAuthorization(a.ctx)
 }
 
 // PickFolder opens a native folder picker

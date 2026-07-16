@@ -31,10 +31,6 @@ an active `gh auth` session) powers a full Pull Requests tab: list with
 filters/search, Conversation/Commits/Checks/Files-changed detail, inline
 review comments on a GitHub-style split diff, merge/squash/rebase.
 
-**Activity** — per-project commit history and a lightweight quality score,
-matched to each repo's own Git identity so multi-account machines stay
-accurate. Optional opt-in commit/push tracking via local Git hooks.
-
 **Resources** — live CPU/memory/disk/network/GPU usage, a full process list
 (sortable, killable), installed-apps scan with CPU/Mem and open/quit actions,
 and a 24h sampled history (sparkline charts + a memory-leak heuristic).
@@ -64,19 +60,36 @@ scanning keeps running; Cmd+Q or the Dock icon's Quit exits fully.
 
 ## Packaging
 
+One-time setup (see Development below) is required before `wails build` will
+compile.
+
 ```bash
 cd desktop
 wails build
 ./build/package-dmg.sh
 ```
 
-Produces `desktop/build/bin/Thaloca.dmg` via `hdiutil` (no extra tooling).
-Code-signing is ad-hoc only (no Apple Developer ID/notarization), so a
-downloaded copy shows Gatekeeper's "unidentified developer" warning —
-right-click → Open once, or `xattr -cr /Applications/Thaloca.app`. Update
-checking only links to the latest GitHub release; it doesn't auto-install.
+Produces `desktop/build/bin/Thaloca.dmg`, `Thaloca.app.zip`, and
+`Thaloca.app.zip.sha256` via macOS system tools (no extra packaging tooling).
+Upload both ZIP assets together so users can verify the download manually.
+Builds target Apple Silicon (arm64) only — the bundled VPN binaries are
+arm64 bottles, so there is no Intel build. Code-signing is ad-hoc only (no
+Apple Developer ID/notarization), so a downloaded copy shows Gatekeeper's
+"unidentified developer" warning — right-click → Open once, or
+`xattr -cr /Applications/Thaloca.app`. Checking for updates only opens the
+latest GitHub release; installation remains manual until releases are signed
+with an independent key or Apple Developer ID.
 
 ## Development
+
+One-time setup on a fresh clone — fetches the bundled VPN binaries
+(`desktop/vpnbin/` is gitignored, and `go build`/`wails build` fail to
+compile without it):
+
+```bash
+cd desktop
+./scripts/fetch-vpn-binaries.sh
+```
 
 ```bash
 cd desktop
@@ -87,3 +100,9 @@ wails build  # production build
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Thaloca bundles pre-built WireGuard, OpenVPN, Bash, and supporting libraries
+under their own licenses — see
+[desktop/THIRD_PARTY_LICENSES.md](desktop/THIRD_PARTY_LICENSES.md) and
+[desktop/THIRD_PARTY_SOURCE.md](desktop/THIRD_PARTY_SOURCE.md). These notices
+are also included in every distributed app bundle.

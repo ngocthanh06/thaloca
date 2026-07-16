@@ -5,6 +5,8 @@ import {cron} from '../models';
 import {security} from '../models';
 import {context} from '../models';
 
+export function ActivateContainerTerminal(arg1:string):Promise<void>;
+
 export function AddAssignees(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
 export function AddServer(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string,arg7:string):Promise<main.ServerConnection>;
@@ -23,6 +25,8 @@ export function ClearClipboardHistory():Promise<void>;
 
 export function ClipboardHistory():Promise<Array<main.ClipboardEntry>>;
 
+export function CloseContainerTerminal(arg1:string):Promise<void>;
+
 export function ClosePullRequest(arg1:string,arg2:number):Promise<void>;
 
 export function CloseServerTerminal(arg1:string):Promise<void>;
@@ -36,6 +40,8 @@ export function CommitFiles(arg1:string,arg2:string):Promise<Array<main.CommitFi
 export function ComposeDown(arg1:string):Promise<void>;
 
 export function Confirm(arg1:string,arg2:string):Promise<boolean>;
+
+export function ConnectServerVPN(arg1:string):Promise<void>;
 
 export function ContainerLogs(arg1:string):Promise<string>;
 
@@ -54,6 +60,8 @@ export function DeleteClipboardEntry(arg1:string):Promise<Array<main.ClipboardEn
 export function DeleteInstalledApp(arg1:string):Promise<void>;
 
 export function DisableGitEvents(arg1:string):Promise<main.ActivitySummary>;
+
+export function DisconnectServerVPN(arg1:string):Promise<void>;
 
 export function DownloadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -155,6 +163,8 @@ export function ListServerFiles(arg1:string,arg2:string):Promise<Array<main.Remo
 
 export function ListServers():Promise<Array<main.ServerConnection>>;
 
+export function ListVPNEngines():Promise<Array<main.VPNEngineInfo>>;
+
 export function MarkPullRequestReadyForReview(arg1:string,arg2:number):Promise<void>;
 
 export function MergeBranch(arg1:string,arg2:string):Promise<void>;
@@ -163,7 +173,7 @@ export function MergePullRequest(arg1:string,arg2:number,arg3:string):Promise<vo
 
 export function Notify(arg1:string,arg2:string):Promise<void>;
 
-export function OpenContainerTerminal(arg1:string):Promise<void>;
+export function OpenContainerTerminal(arg1:string):Promise<string>;
 
 export function OpenFileAtLine(arg1:string,arg2:string,arg3:number):Promise<void>;
 
@@ -174,8 +184,6 @@ export function OpenInstalledApp(arg1:string):Promise<void>;
 export function OpenPathInFinder(arg1:string):Promise<void>;
 
 export function OpenServerTerminal(arg1:string):Promise<string>;
-
-export function PerformSelfUpdate():Promise<void>;
 
 export function PickDownloadFolder():Promise<string>;
 
@@ -221,6 +229,8 @@ export function RemoveServer(arg1:string):Promise<void>;
 
 export function RemoveServerCronLine(arg1:string,arg2:number):Promise<void>;
 
+export function RemoveServerVPNConfig(arg1:string):Promise<void>;
+
 export function ReopenPullRequest(arg1:string,arg2:number):Promise<void>;
 
 export function ReplyToReviewComment(arg1:string,arg2:number,arg3:number,arg4:string):Promise<void>;
@@ -238,6 +248,8 @@ export function RepoGitHubOwner(arg1:string):Promise<string>;
 export function RepoGraph(arg1:string,arg2:number):Promise<Array<main.GraphCommit>>;
 
 export function RequestReviewers(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
+
+export function ResizeContainerTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function ResizeServerTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
@@ -271,6 +283,8 @@ export function SearchLanguagePackages(arg1:string,arg2:string):Promise<Array<ma
 
 export function ServerContainerLogs(arg1:string,arg2:string):Promise<string>;
 
+export function ServerVPNStatus(arg1:string):Promise<main.VPNStatus>;
+
 export function SetClipboardHistoryEnabled(arg1:boolean):Promise<void>;
 
 export function SetGitHubClientID(arg1:string):Promise<void>;
@@ -282,6 +296,8 @@ export function SetNotificationSettings(arg1:main.NotificationSettings):Promise<
 export function SetPullRequestLabels(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
 export function SetServerCronEnabled(arg1:string,arg2:number,arg3:boolean):Promise<void>;
+
+export function SetServerVPNConfig(arg1:string,arg2:string,arg3:Record<string, string>):Promise<void>;
 
 export function Snapshot(arg1:boolean):Promise<main.Snapshot>;
 
@@ -336,5 +352,7 @@ export function UnstageFile(arg1:string,arg2:string):Promise<void>;
 export function UpdateServer(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string,arg8:string):Promise<main.ServerConnection>;
 
 export function UploadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function WriteContainerTerminal(arg1:string,arg2:string):Promise<void>;
 
 export function WriteServerTerminal(arg1:string,arg2:string):Promise<void>;

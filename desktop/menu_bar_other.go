@@ -2,4 +2,4 @@
 
 package main
 
-func setupMenuBar() {}
+func setupMenuBar(app *App) {}

@@ -61,3 +61,68 @@ test('Servers Containers panel lists remote containers with Start/Stop/Restart/L
   await page.click('[data-server-container-logs]')
   await expect(page.locator('.server-containers pre.tool-action-output')).toContainText('log line for c1')
 })
+
+test('OpenVPN password preserves intentional leading and trailing spaces', async ({ page }) => {
+  await installMockApp(page)
+  await page.goto('/')
+  await page.evaluate(() => {
+    const app = (window as any).go.main.App
+    app.ServerVPNStatus = async () => ({ configured: false, connected: false })
+    app.ListVPNEngines = async () => ([{
+      kind: 'openvpn', name: 'OpenVPN', installed: true, binary: '/app/openvpn',
+      fields: [
+        { key: 'ovpnConfig', label: 'OpenVPN config (.ovpn)', required: true, multiline: true, span: 'wide' },
+        { key: 'password', label: 'Password (optional)', secret: true, span: 'half' },
+      ],
+    }])
+    app.SetServerVPNConfig = async (serverId: string, engine: string, values: Record<string, string>) => {
+      ;(window as any).__calls.push({ name: 'SetServerVPNConfig', args: [serverId, engine, values] })
+    }
+  })
+
+  await page.click('.nav-btn[data-view="servers"]')
+  await page.click('[data-server-vpn-toggle="srv-1"]')
+  await page.click('[data-server-vpn-edit-start="srv-1"]')
+  await page.click('[data-server-vpn-select-engine="srv-1"]')
+  await page.fill('[data-vpn-field-key="ovpnConfig"]', 'client\nremote vpn.example.com 1194')
+  await page.fill('[data-vpn-field-key="password"]', '  keep these spaces  ')
+  await page.click('[data-server-vpn-save="srv-1"]')
+
+  const call = await page.evaluate(() => (window as any).__calls.find((item: any) => item.name === 'SetServerVPNConfig'))
+  expect(call.args[2].password).toBe('  keep these spaces  ')
+})
+
+test('VPN engine buttons stay visible and allow switching protocols', async ({ page }) => {
+  await installMockApp(page)
+  await page.goto('/')
+  await page.evaluate(() => {
+    const app = (window as any).go.main.App
+    app.ServerVPNStatus = async () => ({ configured: false, connected: false })
+    app.ListVPNEngines = async () => ([
+      {
+        kind: 'wireguard', name: 'WireGuard', installed: true, binary: '/app/wg',
+        fields: [{ key: 'privateKey', label: 'Private key', required: true, secret: true, span: 'wide' }],
+      },
+      {
+        kind: 'openvpn', name: 'OpenVPN', installed: true, binary: '/app/openvpn',
+        fields: [{ key: 'ovpnConfig', label: 'OpenVPN config (.ovpn)', required: true, multiline: true, span: 'wide' }],
+      },
+    ])
+  })
+
+  await page.click('.nav-btn[data-view="servers"]')
+  await page.click('[data-server-vpn-toggle="srv-1"]')
+  await page.click('[data-server-vpn-edit-start="srv-1"]')
+
+  const engineButtons = page.locator('[data-server-vpn-select-engine="srv-1"]')
+  await expect(engineButtons).toHaveCount(2)
+  // Add VPN selects the first installed engine immediately.
+  await expect(page.locator('[data-server-vpn-select-engine="srv-1"][data-vpn-engine="wireguard"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-vpn-field-key="privateKey"]')).toBeVisible()
+
+  await page.click('[data-server-vpn-select-engine="srv-1"][data-vpn-engine="openvpn"]')
+  await expect(engineButtons).toHaveCount(2)
+  await expect(page.locator('[data-server-vpn-select-engine="srv-1"][data-vpn-engine="openvpn"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-vpn-field-key="ovpnConfig"]')).toBeVisible()
+  await expect(page.locator('[data-vpn-field-key="privateKey"]')).toHaveCount(0)
+})

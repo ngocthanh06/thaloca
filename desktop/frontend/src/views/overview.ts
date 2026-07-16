@@ -2,12 +2,12 @@
 // refresh (desktop/app.go). Nothing here is persisted or configured by the
 // user — auto-grouping and anomaly detection both happen server-side.
 //
-// The Runtime/Source summary lines and Recent activity list below are
-// derived entirely from data the app already loaded for the Runtime view
-// and the (hidden) Activity dashboard — no extra backend call is made here,
-// so Overview never triggers a second Docker/process/git scan.
+// The Runtime/Source summary lines below are derived entirely from data the
+// app already loaded for the Runtime and Source Control views — no extra
+// backend call is made here, so Overview never triggers a second
+// Docker/process/git scan.
 import type { OverviewResult, ProjectGroup, Anomaly, Service, PortUsage, Job, ActivitySummary } from '../api'
-import { escapeHTML, getStatusClass, formatDate } from '../dom'
+import { escapeHTML, getStatusClass } from '../dom'
 import { openServiceInspector } from '../components/serviceInspector'
 import { t } from '../i18n'
 
@@ -41,7 +41,6 @@ export function renderOverviewView(data: OverviewResult | null, ctx: OverviewCon
     </div>
     ${anomaliesHTML}
     <div class="overview-grid">${projects.map(project => renderProjectCard(project, ctx.ports, ctx.jobs)).join('')}</div>
-    ${renderRecentActivity(ctx.activity)}
   `
 
   container.querySelectorAll<HTMLElement>('[data-overview-service]').forEach(el => {
@@ -87,34 +86,6 @@ function renderSourceSummary(activity: ActivitySummary | null): string {
       <span class="overview-summary-title">${t('Source Control')}</span>
       <p>${parts.join(' · ')}</p>
     </article>`
-}
-
-interface RecentEntry {
-  at: string
-  text: string
-}
-
-// Merge the two Git activity feeds (commits and hook events) into one
-// recency-sorted list. Both are already loaded for the Activity dashboard.
-function renderRecentActivity(activity: ActivitySummary | null): string {
-  if (!activity || (activity.commits.length === 0 && activity.events.length === 0)) return ''
-
-  const entries: RecentEntry[] = [
-    ...activity.commits.map(c => ({ at: c.occurred_at, text: `Commit ${c.hash.slice(0, 7)} in ${c.repo_name}: ${c.subject}` })),
-    ...activity.events.map(e => ({ at: e.occurred_at, text: `${e.event} in ${e.repo_name}${e.subject ? ': ' + e.subject : ''}` })),
-  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8)
-
-  if (entries.length === 0) return ''
-
-  return `
-    <h3 class="section-title">${t('Recent activity')}</h3>
-    <div class="overview-recent">
-      ${entries.map(e => `
-        <div class="overview-recent-row">
-          <span class="overview-recent-time">${escapeHTML(formatDate(e.at))}</span>
-          <span>${escapeHTML(e.text)}</span>
-        </div>`).join('')}
-    </div>`
 }
 
 function findService(projects: ProjectGroup[], id: string): Service | undefined {

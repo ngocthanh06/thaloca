@@ -1,0 +1,4 @@
+# Wails-generated JS/TS bindings (regenerated on every `wails build`) — the
+# generator emits tab-only blank lines, so exempt them from whitespace
+# checks instead of fighting the generator after every build.
+desktop/frontend/wailsjs/** -whitespace

@@ -20,6 +20,11 @@
 /desktop/frontend/playwright-report/
 /desktop/build/bin/
 
+# Fetched by desktop/scripts/fetch-vpn-binaries.sh, //go:embed'd by
+# desktop/vpnbin.go — real third-party binaries, not source, so they don't
+# belong in git history (same reasoning as node_modules/dist above).
+/desktop/vpnbin/
+
 # Secrets: none of these should ever be needed in the repo — Thaloca itself
 # only ever stores paths to keys (~/.thaloca/servers.json, outside the repo)
 # and reads credentials from macOS Keychain, never from a file here. These

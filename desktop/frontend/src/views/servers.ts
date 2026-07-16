@@ -11,7 +11,7 @@
 // local Jobs tab uses); enabling/disabling/removing a line edits that same
 // raw crontab text by line number and writes it back — both require
 // confirmation, like the other remote-mutating actions here.
-import type { ServerConnection, ServerHealth, RemoteContainer, CronJob, SSHConfigHost, RemoteFile } from '../api'
+import type { ServerConnection, ServerHealth, RemoteContainer, CronJob, SSHConfigHost, RemoteFile, ServerVPNStatus, VPNEngineInfo } from '../api'
 import type { ServerTerminalStatus } from '../serverTerminal'
 import { escapeHTML, formatBytes } from '../dom'
 import { t } from '../i18n'
@@ -43,6 +43,7 @@ export interface ServersViewState {
   containers: Map<string, ServerContainersState>
   cron: Map<string, ServerCronState>
   files: Map<string, ServerFilesState>
+  vpn: Map<string, ServerVPNPanelState>
   showAddForm: boolean
   editingServer: ServerConnection | null
   sshConfigHosts?: SSHConfigHost[]
@@ -56,6 +57,30 @@ export interface ServerFilesState {
   items: RemoteFile[]
   error?: string
   transfer?: { kind: 'upload' | 'download'; name: string; running: boolean; error?: string } | null
+}
+
+// VPN config values are never read back out of Thaloca once saved (see
+// desktop/serverVPN.go — there is no "get" RPC, only "set"), the same
+// hide-until-explicit-reveal posture Env Files already takes with secret
+// values, so `editing` always starts blank — entering a new config always
+// replaces whatever (if anything) was saved before. Every field's value
+// lives only in the DOM (read at Save time, same as the Add/Edit Server
+// form's own fields) rather than tracked here on every keystroke.
+// `engines`/`selectedEngine` drive which VPN protocol's fields (privateKey,
+// address, ... for WireGuard vs ovpnConfig, username, ... for OpenVPN)
+// render — entirely data-driven from ListVPNEngines rather than
+// hardcoded per protocol, so a 3rd engine needs no frontend changes here.
+export interface ServerVPNPanelState {
+  status: ServerVPNStatus | null // null while the initial status fetch is in flight
+  engines: VPNEngineInfo[] | null // fetched once when the panel first opens
+  selectedEngine: string | null // engine kind chosen for the guided form
+  editing: boolean
+  busy: 'saving' | 'connecting' | 'disconnecting' | 'removing' | ''
+  error?: string
+  // Live output while installing a not-yet-installed engine's CLI tool
+  // from the picker (same RunToolAction/confirm/poll flow the Tools tab
+  // uses), so the user isn't forced to switch tabs just to install it.
+  installing?: { name: string; output: string; running: boolean; exitCode: number; error?: string }
 }
 
 export interface ServerBulkRunJobStatus {
@@ -285,6 +310,7 @@ function renderServerRow(s: ServerConnection, state: ServersViewState): string {
   const containers = state.containers.get(s.id)
   const cron = state.cron.get(s.id)
   const files = state.files.get(s.id)
+  const vpn = state.vpn.get(s.id)
   const keyWarning = state.keyWarnings.get(s.id)
 
   const statusClass = checking ? 'checking' : health ? (health.reachable ? 'online' : 'offline') : 'unknown'
@@ -335,6 +361,10 @@ function renderServerRow(s: ServerConnection, state: ServersViewState): string {
           <button class="btn-icon-sm" data-server-files-toggle="${escapeHTML(s.id)}" title="${files ? t('Hide files') : t('Files')}">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           </button>
+          <button class="btn-icon-sm" data-server-vpn-toggle="${escapeHTML(s.id)}" title="${vpn ? t('Hide VPN') : t('VPN')}">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            ${s.vpn_enabled ? `<span class="server-action-badge">${t('VPN')}</span>` : ''}
+          </button>
           <details class="server-row-menu">
             <summary class="btn-icon-sm" title="${t('More actions')}">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
@@ -356,7 +386,109 @@ function renderServerRow(s: ServerConnection, state: ServersViewState): string {
       ${containers ? renderContainersPanel(s.id, containers) : ''}
       ${cron ? renderCronPanel(s.id, cron) : ''}
       ${files ? renderFilesPanel(s.id, files) : ''}
+      ${vpn ? renderVPNPanel(s, vpn) : ''}
       ${terminalOpen && state.terminal ? renderTerminalPanel(state.terminal) : ''}
+    </div>`
+}
+
+// One input per WireGuard setting, grouped and sized the same way the
+// Add/Edit Server grid already does (long secrets get their own full-width
+// row, short paired values like Address/DNS share one) — so filling this
+// in doesn't require already knowing the .conf file's [Interface]/[Peer]
+// section syntax, and doesn't just read as one long column either.
+// buildWireGuardConfig (in main.ts) assembles these into the actual config
+// text at Save time. Field lists themselves come from ListVPNEngines (see
+// desktop/serverVPN.go's vpnEngine.fields()) rather than being hardcoded
+// here — a 3rd engine needs no changes to this file.
+
+// VPN config is set-only (see ServerVPNPanelState's doc comment) — every
+// field starts empty, whether adding a config for the first time or
+// replacing an existing one.
+function renderVPNPanel(server: ServerConnection, state: ServerVPNPanelState): string {
+  const serverId = server.id
+  if (!state.status || !state.engines) {
+    return `<div class="server-vpn"><div class="empty compact">${t('Checking VPN status…')}</div></div>`
+  }
+  const { configured, connected } = state.status
+  const configuredEngine = state.engines.find(e => e.kind === server.vpn_type)
+  const statusBadge = connected
+    ? `<span class="status-badge status-healthy">${t('Connected')}</span>`
+    : configured
+      ? `<span class="status-badge status-unknown">${t('Configured — disconnected')}</span>`
+      : `<span class="status-badge status-down">${t('Not configured')}</span>`
+  const busy = state.busy !== ''
+
+  return `
+    <div class="server-vpn">
+      <div class="server-vpn-status">
+        <strong>${t('VPN')}</strong>
+        ${configured && configuredEngine ? `<span class="resource-detail muted">${escapeHTML(configuredEngine.name)}</span>` : ''}
+        ${statusBadge}
+      </div>
+      <p class="resource-detail muted">${t('Some servers only answer SSH once their VPN tunnel is up. Set it up below, then Connect before checking/using it. Bringing the tunnel up or down needs an admin password each time — Thaloca never stores it.')}</p>
+      ${state.error ? `<p class="resource-detail tool-action-failed">${escapeHTML(state.error)}</p>` : ''}
+
+      ${state.editing ? renderVPNEditing(serverId, state) : `
+        <div class="server-vpn-actions">
+          <button class="btn-secondary" data-server-vpn-edit-start="${escapeHTML(serverId)}" ${busy || connected ? 'disabled' : ''} title="${connected ? t('Disconnect first') : ''}">${configured ? t('Replace config') : t('Add VPN config')}</button>
+          ${configured ? `
+            <button class="btn-secondary" data-server-vpn-connect-toggle="${escapeHTML(serverId)}" data-vpn-connected="${connected ? '1' : '0'}" ${busy ? 'disabled' : ''}>
+              ${state.busy === 'connecting' ? t('Connecting…') : state.busy === 'disconnecting' ? t('Disconnecting…') : connected ? t('Disconnect') : t('Connect')}
+            </button>
+            <button class="btn-secondary danger" data-server-vpn-remove="${escapeHTML(serverId)}" ${busy || connected ? 'disabled' : ''} title="${connected ? t('Disconnect first') : ''}">${state.busy === 'removing' ? t('Removing…') : t('Remove config')}</button>` : ''}
+        </div>`}
+    </div>`
+}
+
+// The engine picker always stays visible above the selected engine's fields,
+// so switching between WireGuard and OpenVPN never requires cancelling or
+// reopening the form. Fields remain generic from each VPNFieldDef list.
+function renderVPNEditing(serverId: string, state: ServerVPNPanelState): string {
+  const busy = state.busy !== ''
+  const engines = state.engines || []
+
+  const installing = state.installing
+  const enginePicker = `
+    <div class="server-vpn-engine-picker">
+      ${engines.map(e => e.installed
+        ? `<button class="btn-secondary${state.selectedEngine === e.kind ? ' active' : ''}" data-server-vpn-select-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" aria-pressed="${state.selectedEngine === e.kind ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>${escapeHTML(e.name)}</button>`
+        : `<button class="btn-secondary" data-server-vpn-install-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" data-vpn-binary="${escapeHTML(e.binary)}" data-vpn-name="${escapeHTML(e.name)}" data-vpn-install-command="${escapeHTML(e.install_command || '')}" ${busy || installing?.running ? 'disabled' : ''} title="${t('Click to install')}">
+            ${escapeHTML(e.name)} (${t('not installed')} — ${t('click to install')})
+          </button>`).join('')}
+    </div>`
+
+  if (!state.selectedEngine) {
+    return `
+      ${enginePicker}
+      ${installing ? `
+        <div class="tool-action-panel">
+          <header><strong>${t('Installing')} ${escapeHTML(installing.name)}</strong></header>
+          <pre class="tool-action-output">${escapeHTML(installing.output || t('(no output yet)'))}</pre>
+          <p class="resource-detail ${installing.running ? '' : installing.error || installing.exitCode !== 0 ? 'tool-action-failed' : 'tool-action-ok'}">
+            ${installing.running ? t('Running…') : installing.error ? `${t('Failed:')} ${escapeHTML(installing.error)}` : installing.exitCode === 0 ? t('Done.') : `${t('Exited with code')} ${installing.exitCode}.`}
+          </p>
+        </div>` : ''}
+      <div class="server-vpn-actions">
+        <button class="btn-secondary" data-server-vpn-edit-cancel="${escapeHTML(serverId)}" ${busy ? 'disabled' : ''}>${t('Cancel')}</button>
+      </div>`
+  }
+
+  const engine = engines.find(e => e.kind === state.selectedEngine)
+  if (!engine) return ''
+  return `
+    ${enginePicker}
+    <div class="server-add-grid">
+      ${engine.fields.map(f => `
+        <label class="server-add-field server-add-field-${f.span}">
+          <span>${t(f.label)}${f.required ? ' *' : ''}</span>
+          ${f.multiline
+            ? `<textarea class="server-vpn-textarea" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" ${busy ? 'disabled' : ''}></textarea>`
+            : `<input class="search-input" type="${f.secret ? 'password' : 'text'}" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" autocomplete="off" ${busy ? 'disabled' : ''}>`}
+        </label>`).join('')}
+    </div>
+    <div class="server-vpn-actions">
+      <button class="btn-secondary" data-server-vpn-save="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(engine.kind)}" ${busy ? 'disabled' : ''}>${state.busy === 'saving' ? t('Saving…') : t('Save config')}</button>
+      <button class="btn-secondary" data-server-vpn-edit-cancel="${escapeHTML(serverId)}" ${busy ? 'disabled' : ''}>${t('Cancel')}</button>
     </div>`
 }
 

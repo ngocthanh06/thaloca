@@ -494,6 +494,32 @@ export interface ServerConnection {
   key_path: string
   environment?: string
   proxy_jump?: string
+  vpn_enabled?: boolean
+  vpn_type?: string
+}
+
+export interface VPNFieldDef {
+  key: string
+  label: string
+  placeholder?: string
+  secret?: boolean
+  required?: boolean
+  multiline?: boolean
+  span: 'wide' | 'half' | 'narrow'
+}
+
+export interface VPNEngineInfo {
+  kind: string
+  name: string
+  installed: boolean
+  fields: VPNFieldDef[]
+  binary: string
+  install_command?: string
+}
+
+export interface ServerVPNStatus {
+  configured: boolean
+  connected: boolean
 }
 
 export interface RemoteContainerStatus {
@@ -755,6 +781,13 @@ function normalizeServerHealth(value: Partial<ServerHealth> | null | undefined):
   }
 }
 
+function normalizeServerVPNStatus(value: Partial<ServerVPNStatus> | null | undefined): ServerVPNStatus {
+  return {
+    configured: Boolean(value?.configured),
+    connected: Boolean(value?.connected),
+  }
+}
+
 function normalizeRemoteContainers(value: unknown): RemoteContainer[] {
   return Array.isArray(value) ? value : []
 }
@@ -820,7 +853,6 @@ interface WailsApp {
   SetClipboardHistoryEnabled(enabled: boolean): Promise<void>
   GetAppVersion(): Promise<string>
   CheckForUpdate(): Promise<Partial<UpdateInfo>>
-  PerformSelfUpdate(): Promise<void>
   OpenInstalledApp(path: string): Promise<void>
   QuitInstalledApp(bundleId: string): Promise<void>
   DeleteInstalledApp(path: string): Promise<void>
@@ -843,6 +875,12 @@ interface WailsApp {
   RemoveServer(id: string): Promise<void>
   CheckServer(id: string): Promise<Partial<ServerHealth>>
   CheckServerDraft(host: string, port: number, user: string, keyPath: string, proxyJump: string): Promise<Partial<ServerHealth>>
+  ListVPNEngines(): Promise<VPNEngineInfo[]>
+  SetServerVPNConfig(serverId: string, engineKind: string, values: Record<string, string>): Promise<void>
+  RemoveServerVPNConfig(serverId: string): Promise<void>
+  ServerVPNStatus(serverId: string): Promise<Partial<ServerVPNStatus>>
+  ConnectServerVPN(serverId: string): Promise<void>
+  DisconnectServerVPN(serverId: string): Promise<void>
   KeyPermissionWarning(id: string): Promise<string>
   FixServerKeyPermissions(id: string): Promise<void>
   RunServerCommand(id: string, command: string): Promise<string>
@@ -908,7 +946,11 @@ interface WailsApp {
   RepoFile(path: string, rel: string): Promise<string>
   RestartContainer(id: string): Promise<void>
   ComposeDown(project: string): Promise<void>
-  OpenContainerTerminal(id: string): Promise<void>
+  OpenContainerTerminal(id: string): Promise<string>
+  ActivateContainerTerminal(sessionId: string): Promise<void>
+  WriteContainerTerminal(sessionId: string, data: string): Promise<void>
+  ResizeContainerTerminal(sessionId: string, cols: number, rows: number): Promise<void>
+  CloseContainerTerminal(sessionId: string): Promise<void>
   GitHubClientID(): Promise<string>
   SetGitHubClientID(id: string): Promise<void>
   GitHubDeviceStart(): Promise<DeviceCode>
@@ -1025,8 +1067,6 @@ export const api = {
     const fn = wailsApp()?.CheckForUpdate
     return fn ? fn().then(i => ({ ...fallback, ...i })) : Promise.resolve(fallback)
   },
-  performSelfUpdate: (): Promise<void> =>
-    wailsApp()?.PerformSelfUpdate?.() || Promise.reject(new Error('Wails runtime not available')),
   refreshInstalledApps: (): Promise<InstalledApp[]> => wailsApp()?.RefreshInstalledApps?.() || Promise.resolve([]),
   openInstalledApp: (path: string): Promise<void> => {
     const fn = wailsApp()?.OpenInstalledApp
@@ -1111,6 +1151,30 @@ export const api = {
   checkServerDraft: (host: string, port: number, user: string, keyPath: string, proxyJump: string): Promise<ServerHealth> => {
     const fn = wailsApp()?.CheckServerDraft
     return fn ? fn(host, port, user, keyPath, proxyJump).then(normalizeServerHealth) : Promise.resolve(normalizeServerHealth(null))
+  },
+  listVPNEngines: (): Promise<VPNEngineInfo[]> => {
+    const fn = wailsApp()?.ListVPNEngines
+    return fn ? fn() : Promise.resolve([])
+  },
+  setServerVPNConfig: (serverId: string, engineKind: string, values: Record<string, string>): Promise<void> => {
+    const fn = wailsApp()?.SetServerVPNConfig
+    return fn ? fn(serverId, engineKind, values) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  removeServerVPNConfig: (serverId: string): Promise<void> => {
+    const fn = wailsApp()?.RemoveServerVPNConfig
+    return fn ? fn(serverId) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  serverVPNStatus: (serverId: string): Promise<ServerVPNStatus> => {
+    const fn = wailsApp()?.ServerVPNStatus
+    return fn ? fn(serverId).then(normalizeServerVPNStatus) : Promise.resolve(normalizeServerVPNStatus(null))
+  },
+  connectServerVPN: (serverId: string): Promise<void> => {
+    const fn = wailsApp()?.ConnectServerVPN
+    return fn ? fn(serverId) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  disconnectServerVPN: (serverId: string): Promise<void> => {
+    const fn = wailsApp()?.DisconnectServerVPN
+    return fn ? fn(serverId) : Promise.reject(new Error('Wails runtime not available'))
   },
   keyPermissionWarning: (id: string): Promise<string> => wailsApp()?.KeyPermissionWarning?.(id) || Promise.resolve(''),
   fixServerKeyPermissions: (id: string): Promise<void> => {
@@ -1273,7 +1337,26 @@ export const api = {
   repoFile: (path: string, rel: string) => wailsApp()?.RepoFile?.(path, rel) || Promise.resolve(''),
   restartContainer: (id: string) => wailsApp()?.RestartContainer?.(id) || Promise.resolve(),
   composeDown: (project: string) => wailsApp()?.ComposeDown?.(project) || Promise.resolve(),
-  openContainerTerminal: (id: string) => wailsApp()?.OpenContainerTerminal?.(id) || Promise.resolve(),
+  openContainerTerminal: (id: string): Promise<string> => {
+    const fn = wailsApp()?.OpenContainerTerminal
+    return fn ? fn(id) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  activateContainerTerminal: (sessionId: string): Promise<void> => {
+    const fn = wailsApp()?.ActivateContainerTerminal
+    return fn ? fn(sessionId) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  writeContainerTerminal: (sessionId: string, data: string): Promise<void> => {
+    const fn = wailsApp()?.WriteContainerTerminal
+    return fn ? fn(sessionId, data) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  resizeContainerTerminal: (sessionId: string, cols: number, rows: number): Promise<void> => {
+    const fn = wailsApp()?.ResizeContainerTerminal
+    return fn ? fn(sessionId, cols, rows) : Promise.reject(new Error('Wails runtime not available'))
+  },
+  closeContainerTerminal: (sessionId: string): Promise<void> => {
+    const fn = wailsApp()?.CloseContainerTerminal
+    return fn ? fn(sessionId) : Promise.resolve()
+  },
   githubClientID: (): Promise<string> => wailsApp()?.GitHubClientID?.() || Promise.resolve(''),
   setGitHubClientID: (id: string) => wailsApp()?.SetGitHubClientID?.(id) || Promise.resolve(),
   githubDeviceStart: (): Promise<DeviceCode> => wailsApp()?.GitHubDeviceStart?.() || Promise.reject('native not available'),

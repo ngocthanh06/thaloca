@@ -9,6 +9,10 @@
   "author": {
     "name": "Thaloca"
   },
+  "info": {
+    "productName": "Thaloca",
+    "productVersion": "0.1.5"
+  },
   "wailsjsdir": "frontend",
   "output": "build/bin",
   "package": "build"

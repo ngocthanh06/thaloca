@@ -2,7 +2,7 @@
 // config backup/export-import, and update checking. Opened via the gear
 // icon in the header.
 import { api, type UpdateInfo } from '../api'
-import { showError } from '../dom'
+import { escapeHTML, showError } from '../dom'
 import { getPinnedRepos, setPinnedRepos } from '../views/sourceControl'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { getLocale, setLocale, t, type Locale } from '../i18n'
@@ -21,8 +21,6 @@ let current = {
 let appVersion = ''
 let updateCheck: UpdateInfo | null = null
 let checkingForUpdate = false
-let selfUpdating = false
-let selfUpdateError = ''
 let clipboardHistoryEnabled = true
 
 export function initSettingsPanel(): void {
@@ -98,7 +96,7 @@ function render(): void {
       </section>
       <section class="settings-section">
         <h3>${t('Updates')}</h3>
-        <p class="resource-detail muted">${t('Version')} ${appVersion || '—'}. ${t('Checking looks for a newer GitHub release. "Update now" downloads and installs it, then restarts Thaloca — nothing happens without confirming first.')}</p>
+        <p class="resource-detail muted">${t('Version')} ${appVersion ? escapeHTML(appVersion) : '—'}. ${t('Checking looks for a newer GitHub release. Installation stays manual because this build is not Developer ID signed or notarized.')}</p>
         <div class="settings-buttons">
           <button class="btn-secondary" data-settings-check-update ${checkingForUpdate ? 'disabled' : ''}>${checkingForUpdate ? t('Checking…') : t('Check for updates')}</button>
         </div>
@@ -125,21 +123,16 @@ function render(): void {
   root.querySelector('[data-settings-open-release]')?.addEventListener('click', () => {
     if (updateCheck?.release_url) BrowserOpenURL(updateCheck.release_url)
   })
-  root.querySelector('[data-settings-self-update]')?.addEventListener('click', () => void handleSelfUpdate())
 }
 
 function renderUpdateResult(): string {
-  if (selfUpdateError) {
-    return `<p class="resource-detail tool-action-failed">${t('Could not update:')} ${selfUpdateError}</p>`
-  }
   if (!updateCheck) return ''
   if (updateCheck.error) {
-    return `<p class="resource-detail tool-action-failed">${t('Could not check for updates:')} ${updateCheck.error}</p>`
+    return `<p class="resource-detail tool-action-failed">${t('Could not check for updates:')} ${escapeHTML(updateCheck.error)}</p>`
   }
   if (updateCheck.available) {
-    return `<p class="resource-detail">Thaloca ${updateCheck.latest_version} ${t('is available.')}
+    return `<p class="resource-detail">Thaloca ${escapeHTML(updateCheck.latest_version || '')} ${t('is available.')}
       <button class="btn-secondary" data-settings-open-release>${t('Open release page')}</button>
-      <button class="btn-primary" data-settings-self-update ${selfUpdating ? 'disabled' : ''}>${selfUpdating ? t('Updating…') : t('Update now')}</button>
     </p>`
   }
   return `<p class="resource-detail muted">${t("You're on the latest version.")}</p>`
@@ -155,30 +148,6 @@ async function handleCheckForUpdate(): Promise<void> {
   }
   checkingForUpdate = false
   render()
-}
-
-// Downloads the new build, swaps it in for the currently-installed .app,
-// and relaunches — see desktop/selfupdate.go's PerformSelfUpdate for the
-// mechanics. On success the app quits before this function would ever
-// resolve, so there's nothing to render for that case; on failure nothing
-// was touched, so it's safe to just show the error and let the user retry
-// or fall back to "Open release page".
-async function handleSelfUpdate(): Promise<void> {
-  if (selfUpdating) return
-  if (!(await api.confirmDialog(
-    'Update Thaloca',
-    `Download Thaloca ${updateCheck?.latest_version || ''} and install it now? Thaloca will quit and reopen automatically once the update is in place.`,
-  ))) return
-  selfUpdating = true
-  selfUpdateError = ''
-  render()
-  try {
-    await api.performSelfUpdate()
-  } catch (error) {
-    selfUpdateError = String(error)
-    selfUpdating = false
-    render()
-  }
 }
 
 async function handleClipboardHistoryToggle(enabled: boolean): Promise<void> {

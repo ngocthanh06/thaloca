@@ -13,7 +13,7 @@ import (
 // desktop/frontend/package.json's "version") together when cutting a
 // release. There's no build-time version-injection set up, so it's a
 // plain constant kept in sync by hand.
-const AppVersion = "0.1.4"
+const AppVersion = "0.1.5"
 
 // updateRepo is the GitHub repo releases are checked against. Hardcoded
 // like the embedded GitHub OAuth client ID elsewhere in this app — it's
@@ -35,13 +35,9 @@ func (a *App) GetAppVersion() string {
 }
 
 // CheckForUpdate compares AppVersion against the GitHub repo's latest
-// release tag. This is a check-and-notify mechanism, not a silent
-// auto-installer: Thaloca is only ad-hoc code-signed (no Apple Developer
-// ID/notarization set up — see README's Packaging section), so a real
-// background download-and-replace would still hit the same Gatekeeper
-// friction a manual download does, without the transparency of the user
-// choosing when to update. Finding a newer release just surfaces a
-// download link; installing it is still a manual DMG replace.
+// release tag. The background loop only notifies and Settings opens the
+// release page; installation remains manual while builds are only ad-hoc
+// signed and have no independent update-signing key.
 func (a *App) CheckForUpdate() UpdateInfo {
 	info := UpdateInfo{CurrentVersion: AppVersion}
 

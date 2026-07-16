@@ -11,7 +11,7 @@ test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page
   await page.waitForSelector('.nav-btn')
 
   const navLabels = await page.locator('.nav-btn span').allTextContents()
-  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Activity', 'Resources', 'Tools', 'Servers', 'Logs', 'Security'])
+  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Resources', 'Tools', 'Servers', 'Logs', 'Security'])
 
   await page.click('.nav-btn[data-view="runtime"]')
   const subtabLabels = await page.locator('#services-subtabs .subtab').allTextContents()
@@ -19,6 +19,11 @@ test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page
 
   await page.click('#services-subtabs .subtab[data-subtab="jobs"]')
   await expect(page.locator('#subview-jobs')).toHaveClass(/active/)
+
+  await page.click('.nav-btn[data-view="source"]')
+  await expect(page.locator('#source-subtabs .subtab')).toHaveText(['Workspace', 'Repositories'])
+  await page.click('#source-subtabs .subtab[data-source-subtab="repositories"]')
+  await expect(page.locator('#repos-list')).toBeVisible()
 
   expect(errors).toEqual([])
 })

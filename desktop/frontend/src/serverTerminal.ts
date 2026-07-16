@@ -168,7 +168,8 @@ export async function openServerTerminal(
     term.write(base64ToUint8Array(chunk))
   })
   session.unsubClosed = EventsOn(`server-terminal-closed:${sessionId}`, (payload: { exit_code: number; error?: string }) => {
-    if (session.closed) return
+    if (session.closed || active !== session) return
+    disposeActive()
     onStatus('closed', payload?.error)
   })
 

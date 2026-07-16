@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 
 	"thaloca.local/thaloca/internal/discovery"
 )
@@ -17,61 +16,35 @@ import (
 // be reached, so the UI can tell "genuinely zero containers" apart from
 // "Docker/OrbStack isn't actually running" instead of showing an identical
 // empty list for both. dockerServices/dockerContextStatuses/dockerErr are
-// Snapshot's single already-run discovery.ScanDocker result, passed in
-// rather than scanned again here (Docker was otherwise scanned three times
-// per Snapshot — once each in discoverAll, discoverPorts, discoverJobs).
-// repoPaths are likewise Snapshot's already-cached repo list (see
-// App.cachedRepoPaths) instead of a fresh filesystem walk on every call.
-func discoverAll(ctx context.Context, repoPaths []string, dockerServices []discovery.Service, dockerContextStatuses []discovery.DockerContextStatus, dockerErr error) ([]Service, string) {
-	var wg sync.WaitGroup
-	results := make(chan []Service, 3)
+// Snapshot's single already-run discovery.ScanDocker result, and
+// procServices its already-run discovery.ScanProcesses result — both passed
+// in (Snapshot runs them in parallel under separate deadlines) rather than
+// scanned again here. repoPaths are likewise Snapshot's already-cached repo
+// list (see App.cachedRepoPaths) instead of a fresh filesystem walk on
+// every call.
+func discoverAll(repoPaths []string, procServices []discovery.Service, dockerServices []discovery.Service, dockerContextStatuses []discovery.DockerContextStatus, dockerErr error) ([]Service, string) {
 	var dockerStatus string
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if _, err := exec.LookPath("docker"); err != nil {
-			dockerStatus = "Docker CLI not found — install Docker Desktop or OrbStack."
-			results <- nil
-			return
+	if _, err := exec.LookPath("docker"); err != nil {
+		dockerStatus = "Docker CLI not found — install Docker Desktop or OrbStack."
+		dockerServices = nil
+	} else if dockerErr != nil {
+		dockerStatus = "Docker not reachable: " + discovery.DockerErrorDetail(dockerErr)
+	} else if len(dockerContextStatuses) > 0 {
+		// Some contexts merged in fine (dockerServices isn't empty/all-failed
+		// — that's the err != nil case above) but at least one couldn't be
+		// reached — surface which, without hiding the containers that did
+		// come through.
+		parts := make([]string, len(dockerContextStatuses))
+		for i, s := range dockerContextStatuses {
+			parts[i] = s.Context + ": " + s.Error
 		}
-		if dockerErr != nil {
-			dockerStatus = "Docker not reachable: " + discovery.DockerErrorDetail(dockerErr)
-		} else if len(dockerContextStatuses) > 0 {
-			// Some contexts merged in fine (svcs isn't empty/all-failed —
-			// that's the err != nil case above) but at least one couldn't be
-			// reached — surface which, without hiding the containers that
-			// did come through.
-			parts := make([]string, len(dockerContextStatuses))
-			for i, s := range dockerContextStatuses {
-				parts[i] = s.Context + ": " + s.Error
-			}
-			dockerStatus = "Some Docker contexts not reachable — " + strings.Join(parts, "; ")
-		}
-		results <- dockerServices
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		svcs, _ := discovery.ScanProcesses(ctx)
-		results <- svcs
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		results <- discovery.ServicesFromRepoPaths(repoPaths)
-	}()
-
-	wg.Wait()
-	close(results)
-
-	var all []Service
-	for svcs := range results {
-		all = append(all, svcs...)
+		dockerStatus = "Some Docker contexts not reachable — " + strings.Join(parts, "; ")
 	}
 
+	var all []Service
+	all = append(all, dockerServices...)
+	all = append(all, procServices...)
+	all = append(all, discovery.ServicesFromRepoPaths(repoPaths)...)
 	return discovery.Deduplicate(all), dockerStatus
 }
 

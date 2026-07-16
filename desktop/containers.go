@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,14 +16,19 @@ import (
 )
 
 // processAlive reports whether pid still exists, via the Unix convention of
-// sending signal 0 — delivers nothing, just checks that the process (and
-// this app's permission to signal it) still exists.
+// sending signal 0 — delivers nothing, just checks the process still
+// exists. EPERM counts as alive: it means the kernel found a process at
+// that PID but this (unprivileged) process isn't allowed to signal it —
+// e.g. a VPN daemon started via runPrivileged, which runs as root. Only
+// ESRCH (or any other error, in practice always ESRCH here) means the PID
+// is actually gone.
 func processAlive(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
-	return process.Signal(syscall.Signal(0)) == nil
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func (a *App) StopProcess(pid int) error {
@@ -152,16 +158,9 @@ func (a *App) ComposeDown(project string) error {
 
 var containerIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
-// OpenContainerTerminal opens Terminal.app with an interactive shell inside
-// the container (bash when available, sh otherwise).
-func (a *App) OpenContainerTerminal(containerID string) error {
-	containerID = strings.TrimSpace(containerID)
-	if !containerIDPattern.MatchString(containerID) {
-		return fmt.Errorf("invalid container id")
-	}
-	command := fmt.Sprintf("docker exec -it %s sh -c 'command -v bash >/dev/null && exec bash || exec sh'", containerID)
-	return openInTerminal(command)
-}
+// OpenContainerTerminal used to live here (opening Terminal.app externally
+// via openInTerminal below); it's now a PTY-backed session embedded in
+// Thaloca itself — see desktop/containerTerminal.go.
 
 func openInTerminal(command string) error {
 	if runtime.GOOS != "darwin" {
