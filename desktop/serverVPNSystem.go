@@ -38,9 +38,8 @@ type systemVPNService struct {
 	Type string // the bracketed service type, e.g. "PPP:L2TP", "VPN:IKEv2"
 }
 
-// systemVPNListLine matches one enabled service line of `scutil --nc list`:
-//
-//	* (Disconnected)   5A735FE5-... PPP --> L2TP  "concrete-vpn"  [PPP:L2TP]
+// systemVPNListLine matches enabled `scutil --nc list` lines such as
+// `* (Disconnected) 5A735FE5-... PPP --> L2TP "concrete-vpn" [PPP:L2TP]`.
 //
 // Lines without the leading "*" are disabled services that scutil cannot
 // start, so they are deliberately not offered.
@@ -214,10 +213,15 @@ func (e systemVPNEngine) connect(serverID string) error {
 	} else if status == "Connected" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if out, startErr := exec.CommandContext(ctx, "scutil", "--nc", "start", cfg.ServiceID).CombinedOutput(); startErr != nil {
-		return fmt.Errorf("scutil --nc start: %s", combinedOutputTail(out, startErr))
+	// Do not use `scutil --nc start` here. Apple's scutil implementation
+	// always supplies empty PPP/IPSec user-options dictionaries, even when
+	// no --user/--password/--secret flags were given. For L2TP that can
+	// override the saved user preferences and make pppd see an incorrect
+	// shared secret, while starting the same service from System Settings
+	// succeeds. The native bridge passes NULL userOptions, which is the
+	// documented way to use the service's saved default configuration.
+	if startErr := startSystemVPN(cfg.ServiceID); startErr != nil {
+		return fmt.Errorf("start System VPN: %w", startErr)
 	}
 	sawAttempt := false
 	deadline := time.Now().Add(25 * time.Second)
