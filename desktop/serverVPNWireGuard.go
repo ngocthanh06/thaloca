@@ -10,25 +10,22 @@ import (
 	"time"
 )
 
-// wireGuardEngine implements vpnEngine for WireGuard. Unlike other engines,
-// it never shells out to a system-installed wg/wg-quick — those binaries
-// are bundled inside Thaloca itself (see vpnbin.go) and extracted to
-// vpnBinDir() on demand, so this works with no separate install step.
+// wireGuardEngine implements vpnEngine for WireGuard, shelling out to the
+// user-installed wg-quick (`brew install wireguard-tools`, which the engine
+// picker offers as a one-click install — see ListVPNEngines). That formula
+// also brings in wg-quick's own dependencies: wg, wireguard-go, and a
+// modern GNU bash (macOS's /bin/bash is stuck on 3.2, too old for the
+// `declare -A` wg-quick requires).
 type wireGuardEngine struct{}
 
 func (wireGuardEngine) kind() string { return "wireguard" }
 func (wireGuardEngine) name() string { return "WireGuard" }
 
-// binary returns the bundled wg's full path (extracting it first if
-// needed), not just "wg" — there is deliberately nothing on the system
-// PATH for this engine to depend on.
-func (wireGuardEngine) binary() string {
-	dir, err := vpnBinDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "wg")
-}
+// binary is the engine's primary command name — the installSpecs key the
+// frontend's one-click install uses. Installed-ness is probed via
+// vpnEnginePrograms/vpnEngineInstalled, which also covers wg-quick's
+// wg/wireguard-go/bash dependencies.
+func (wireGuardEngine) binary() string { return "wg-quick" }
 
 // wireGuardRootUnsafeKeys are wg-quick config keys that execute shell
 // commands (PreUp/PostUp/PreDown/PostDown) or write files (SaveConfig) as
@@ -166,14 +163,18 @@ func (e wireGuardEngine) connected(serverID string) bool {
 	return err == nil
 }
 
-// connect stages the bundled bash/wg-quick/wg/wireguard-go and this
-// server's .conf into the root-owned run dir — hash-verified there, see
-// vpnStageScript — then runs wg-quick up from those copies. Root never
-// executes or reads anything under the user-writable home directory, so a
-// same-user process can't swap a binary or config while the admin password
-// dialog is open. wg-quick is invoked as an explicit argument to the
-// bundled GNU bash: its own `#!/usr/bin/env bash` shebang would resolve to
-// macOS's bash 3.2, too old for the `declare -A` wg-quick requires.
+// connect stages the Homebrew-installed bash/wg-quick/wg/wireguard-go
+// (resolved into their kegs and hashed first — see vpnStagedExecutables)
+// and this server's .conf into the root-owned run dir — every copy
+// hash-verified there, see vpnStageScript — then runs wg-quick up from
+// those copies. Root never executes or reads anything under a
+// user-writable directory, so a same-user process can't swap a program or
+// the config while the admin password dialog is open. wg-quick is invoked
+// as an explicit argument to the staged GNU bash (its `#!/usr/bin/env
+// bash` shebang would resolve to macOS's bash 3.2, too old for the
+// `declare -A` wg-quick requires), and wg-quick itself prepends its own
+// directory — the run dir — to PATH, which is where it then finds the
+// staged wg and wireguard-go.
 func (e wireGuardEngine) connect(serverID string) error {
 	script, base, runDir, err := e.stagedScript(serverID)
 	if err != nil {
@@ -233,7 +234,7 @@ func (e wireGuardEngine) stagedScript(serverID string) (script, base, runDir str
 	if err := validateWireGuardConfig(string(conf)); err != nil {
 		return "", "", "", err
 	}
-	files, err := vpnStagedBinaries("bash", "wg-quick", "wg", "wireguard-go")
+	files, err := vpnStagedExecutables(e.kind())
 	if err != nil {
 		return "", "", "", err
 	}

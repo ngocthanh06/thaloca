@@ -506,6 +506,13 @@ export interface VPNFieldDef {
   required?: boolean
   multiline?: boolean
   span: 'wide' | 'half' | 'narrow'
+  type?: 'select'
+  options?: VPNFieldOption[]
+}
+
+export interface VPNFieldOption {
+  value: string
+  label: string
 }
 
 export interface VPNEngineInfo {
@@ -515,6 +522,7 @@ export interface VPNEngineInfo {
   fields: VPNFieldDef[]
   binary: string
   install_command?: string
+  install_blocked_reason?: string
 }
 
 export interface ServerVPNStatus {
@@ -860,6 +868,7 @@ interface WailsApp {
   RefreshTools(): Promise<Partial<ToolsSnapshot>>
   RunToolAction(tool: string, action: string): Promise<string>
   OpenHomebrewInstallInTerminal(): Promise<void>
+  OpenSystemVPNSettings(): Promise<void>
   ToolActionStatus(jobID: string): Promise<Partial<ToolActionStatus>>
   SearchBrewPackages(query: string): Promise<BrewSearchResult[]>
   ListBrewPackages(): Promise<Partial<BrewPackages>>
@@ -1253,6 +1262,10 @@ export const api = {
   },
   openHomebrewInstallInTerminal: (): Promise<void> => {
     const fn = wailsApp()?.OpenHomebrewInstallInTerminal
+    return fn ? fn() : Promise.reject(new Error('Wails runtime not available'))
+  },
+  openSystemVPNSettings: (): Promise<void> => {
+    const fn = wailsApp()?.OpenSystemVPNSettings
     return fn ? fn() : Promise.reject(new Error('Wails runtime not available'))
   },
   hasVSCode: (): Promise<boolean> => wailsApp()?.HasVSCode?.() || Promise.resolve(false),

@@ -11,10 +11,9 @@ import (
 	"time"
 )
 
-// openVPNEngine implements vpnEngine for OpenVPN. Like WireGuard, it never
-// shells out to a system-installed openvpn — the binary (and its relocated
-// lzo/lz4/openssl/pkcs11-helper dylib dependencies) is bundled inside
-// Thaloca itself (see vpnbin.go) and extracted to vpnBinDir() on demand.
+// openVPNEngine implements vpnEngine for OpenVPN, shelling out to the
+// user-installed openvpn (`brew install openvpn`, which the engine picker
+// offers as a one-click install — see ListVPNEngines).
 type openVPNEngine struct{}
 
 // openVPNSafeDirectives is an allowlist of client-only options that neither
@@ -55,16 +54,11 @@ var openVPNSafeInlineBlocks = map[string]struct{}{
 func (openVPNEngine) kind() string { return "openvpn" }
 func (openVPNEngine) name() string { return "OpenVPN" }
 
-// binary returns the bundled openvpn's full path (extracting it and its
-// dylib dependencies first if needed), not just "openvpn" — there is
-// deliberately nothing on the system PATH for this engine to depend on.
-func (openVPNEngine) binary() string {
-	dir, err := vpnBinDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "openvpn")
-}
+// binary is the engine's primary command name — the installSpecs key the
+// frontend's one-click install uses. Installed-ness is probed via
+// vpnEnginePrograms/vpnEngineInstalled (Homebrew installs openvpn into
+// sbin, which vpnResolveExecutable searches too).
+func (openVPNEngine) binary() string { return "openvpn" }
 
 func (openVPNEngine) fields() []VPNFieldDef {
 	return []VPNFieldDef{
@@ -226,9 +220,9 @@ func (e openVPNEngine) connected(serverID string) bool {
 }
 
 // openVPNProcessMatches reports whether pid is alive and really is the
-// staged openvpn launched from this server's run dir, by checking the
-// process's command line for the run dir path (unique per server, root-only
-// writable, and present in every argument connect() passes).
+// openvpn launched for this server's run dir, by checking the process's
+// command line for the run dir path (unique per server, root-only writable,
+// and present in the --config/--writepid/--log arguments connect() passes).
 func openVPNProcessMatches(pid int, runDir string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -239,15 +233,18 @@ func openVPNProcessMatches(pid int, runDir string) bool {
 	return strings.Contains(string(out), runDir+"/")
 }
 
-// connect stages the bundled openvpn (plus its dylibs) and this server's
-// config/credentials into the root-owned run dir — hash-verified there, see
-// vpnStageScript — then starts openvpn as a background daemon from those
-// copies (admin privileges are needed to create the tun device, same as
-// WireGuard's wg-quick — see ConnectServerVPN's doc comment). The .ovpn is
-// re-validated here, not just at save: a config rewritten on disk after
-// Save must not smuggle exec directives into the root-privileged run. It
-// then briefly polls the log for a real completion signal, since `openvpn
-// --daemon` returns almost immediately, well before the handshake finishes.
+// connect stages the Homebrew-installed openvpn (resolved into its keg and
+// hashed first — see vpnStagedExecutables) and this server's
+// config/credentials into the root-owned run dir — every copy
+// hash-verified there, see vpnStageScript — then starts openvpn as a
+// background daemon from those copies (admin privileges are needed to
+// create the tun device, same as WireGuard's wg-quick — see
+// ConnectServerVPN's doc comment). Root never executes or reads anything
+// under a user-writable directory. The .ovpn is re-validated here, not
+// just at save: a config rewritten on disk after Save must not smuggle
+// exec directives into the root-privileged run. It then briefly polls the
+// log for a real completion signal, since `openvpn --daemon` returns
+// almost immediately, well before the handshake finishes.
 func (e openVPNEngine) connect(serverID string) error {
 	ovpnPath, authPath, pidPath, logPath, err := e.paths(serverID)
 	if err != nil {
@@ -266,7 +263,7 @@ func (e openVPNEngine) connect(serverID string) error {
 		return fmt.Errorf("this server's VPN is already connected")
 	}
 
-	files, err := vpnStagedBinaries("openvpn")
+	files, err := vpnStagedExecutables(e.kind())
 	if err != nil {
 		return err
 	}
@@ -313,10 +310,11 @@ func (e openVPNEngine) connect(serverID string) error {
 // privileges since the process was started as root. The privileged script
 // re-reads the PID from the root-owned pid file itself and verifies the
 // process's command line really is this server's staged openvpn before
-// killing, so a PID recycled by an unrelated root process after a crash is
-// never killed; a stale pid file is just cleaned up. Afterwards the whole
-// root-owned run dir is removed — the staged config/auth copies hold
-// credentials and nothing running needs them anymore.
+// killing, so a PID
+// recycled by an unrelated root process after a crash is never killed; a
+// stale pid file is just cleaned up. Afterwards the whole root-owned run
+// dir is removed — the staged config/auth copies hold credentials and
+// nothing running needs them anymore.
 func (e openVPNEngine) disconnect(serverID string) error {
 	_, _, pidPath, _, err := e.paths(serverID)
 	if err != nil {

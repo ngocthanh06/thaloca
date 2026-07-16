@@ -32,16 +32,15 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
-# License notices must accompany the bundled GPL/MIT/BSD/Apache VPN
-# binaries. Add them before distribution, then refresh the ad-hoc signature
+# License notices for the Go modules and npm packages compiled into the
+# app. Add them before distribution, then refresh the ad-hoc signature
 # because modifying Contents/Resources invalidates Wails' build signature.
 LICENSE_DIR="$APP_PATH/Contents/Resources/Licenses"
+rm -rf "$LICENSE_DIR"
 mkdir -p "$LICENSE_DIR"
+node scripts/generate-third-party-notices.mjs
 cp ../LICENSE "$LICENSE_DIR/Thaloca-LICENSE.txt"
-cp THIRD_PARTY_LICENSES.md "$LICENSE_DIR/THIRD_PARTY_LICENSES.md"
-cp THIRD_PARTY_SOURCE.md "$LICENSE_DIR/THIRD_PARTY_SOURCE.md"
-cp scripts/vpn-binaries.lock "$LICENSE_DIR/vpn-binaries.lock"
-cp scripts/fetch-vpn-binaries.sh "$LICENSE_DIR/fetch-vpn-binaries.sh"
+cp THIRD_PARTY_NOTICES.md "$LICENSE_DIR/THIRD_PARTY_NOTICES.md"
 codesign --force --deep --sign - "$APP_PATH"
 
 rm -f "$DMG_PATH" "$ZIP_PATH" "$ZIP_CHECKSUM_PATH"

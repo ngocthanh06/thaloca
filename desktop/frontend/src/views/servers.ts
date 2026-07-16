@@ -15,6 +15,7 @@ import type { ServerConnection, ServerHealth, RemoteContainer, CronJob, SSHConfi
 import type { ServerTerminalStatus } from '../serverTerminal'
 import { escapeHTML, formatBytes } from '../dom'
 import { t } from '../i18n'
+import { HOMEBREW_BLOCKED_REASON } from './tools'
 
 export interface ServerTerminalState {
   serverId: string
@@ -440,6 +441,21 @@ function renderVPNPanel(server: ServerConnection, state: ServerVPNPanelState): s
     </div>`
 }
 
+// renderVPNInstallBlocked shows, as visible text below the engine picker,
+// why a missing engine can't be installed from here (currently only:
+// Homebrew itself is missing) — mirroring the Tools tab, which also offers
+// its existing Install Homebrew flow (the global data-open-homebrew-install
+// handler) for that one reason with a concrete next step.
+function renderVPNInstallBlocked(engines: VPNEngineInfo[]): string {
+  const reason = engines.find(e => !e.installed && !e.install_command && e.install_blocked_reason)?.install_blocked_reason
+  if (!reason) return ''
+  return `
+    <div class="server-vpn-install-blocked">
+      <p class="resource-detail muted">${escapeHTML(t(reason))}</p>
+      ${reason === HOMEBREW_BLOCKED_REASON ? `<button class="btn-secondary" data-open-homebrew-install>${t('Install Homebrew…')}</button>` : ''}
+    </div>`
+}
+
 // The engine picker always stays visible above the selected engine's fields,
 // so switching between WireGuard and OpenVPN never requires cancelling or
 // reopening the form. Fields remain generic from each VPNFieldDef list.
@@ -450,12 +466,25 @@ function renderVPNEditing(serverId: string, state: ServerVPNPanelState): string 
   const installing = state.installing
   const enginePicker = `
     <div class="server-vpn-engine-picker">
-      ${engines.map(e => e.installed
-        ? `<button class="btn-secondary${state.selectedEngine === e.kind ? ' active' : ''}" data-server-vpn-select-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" aria-pressed="${state.selectedEngine === e.kind ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>${escapeHTML(e.name)}</button>`
-        : `<button class="btn-secondary" data-server-vpn-install-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" data-vpn-binary="${escapeHTML(e.binary)}" data-vpn-name="${escapeHTML(e.name)}" data-vpn-install-command="${escapeHTML(e.install_command || '')}" ${busy || installing?.running ? 'disabled' : ''} title="${t('Click to install')}">
+      ${engines.map(e => {
+        if (e.installed) {
+          return `<button class="btn-secondary${state.selectedEngine === e.kind ? ' active' : ''}" data-server-vpn-select-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" aria-pressed="${state.selectedEngine === e.kind ? 'true' : 'false'}" ${busy ? 'disabled' : ''}>${escapeHTML(e.name)}</button>`
+        }
+        // No install command means the installer itself (Homebrew) is
+        // missing — the visible explanation (and the Install Homebrew
+        // button) is rendered below the picker, since a disabled button's
+        // tooltip is not reliably reachable (see ListVPNEngines).
+        if (!e.install_command) {
+          return `<button class="btn-secondary" disabled>
+            ${escapeHTML(e.name)} (${t('not installed')})
+          </button>`
+        }
+        return `<button class="btn-secondary" data-server-vpn-install-engine="${escapeHTML(serverId)}" data-vpn-engine="${escapeHTML(e.kind)}" data-vpn-binary="${escapeHTML(e.binary)}" data-vpn-name="${escapeHTML(e.name)}" data-vpn-install-command="${escapeHTML(e.install_command)}" ${busy || installing?.running ? 'disabled' : ''} title="${t('Click to install')}">
             ${escapeHTML(e.name)} (${t('not installed')} — ${t('click to install')})
-          </button>`).join('')}
-    </div>`
+          </button>`
+      }).join('')}
+    </div>
+    ${renderVPNInstallBlocked(engines)}`
 
   if (!state.selectedEngine) {
     return `
@@ -475,15 +504,33 @@ function renderVPNEditing(serverId: string, state: ServerVPNPanelState): string 
 
   const engine = engines.find(e => e.kind === state.selectedEngine)
   if (!engine) return ''
+  // A select field with no options can't be filled in — for the System VPN
+  // engine that means no VPN is configured in macOS yet, so replace the
+  // form with an explanation and a button opening the system's own VPN
+  // settings (the only place such a VPN can be created).
+  const emptySelect = engine.fields.find(f => f.type === 'select' && !(f.options || []).length)
+  if (emptySelect) {
+    return `
+      ${enginePicker}
+      <p class="resource-detail muted">${t('No VPN configurations found in macOS System Settings. Create one there first (e.g. L2TP/IPsec or IKEv2), including its password, then reopen this panel.')}</p>
+      <div class="server-vpn-actions">
+        <button class="btn-secondary" data-open-vpn-settings>${t('Open VPN Settings…')}</button>
+        <button class="btn-secondary" data-server-vpn-edit-cancel="${escapeHTML(serverId)}" ${busy ? 'disabled' : ''}>${t('Cancel')}</button>
+      </div>`
+  }
   return `
     ${enginePicker}
     <div class="server-add-grid">
       ${engine.fields.map(f => `
         <label class="server-add-field server-add-field-${f.span}">
           <span>${t(f.label)}${f.required ? ' *' : ''}</span>
-          ${f.multiline
-            ? `<textarea class="server-vpn-textarea" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" ${busy ? 'disabled' : ''}></textarea>`
-            : `<input class="search-input" type="${f.secret ? 'password' : 'text'}" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" autocomplete="off" ${busy ? 'disabled' : ''}>`}
+          ${f.type === 'select'
+            ? `<select class="search-input" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" ${busy ? 'disabled' : ''}>
+                ${(f.options || []).map(o => `<option value="${escapeHTML(o.value)}">${escapeHTML(o.label)}</option>`).join('')}
+              </select>`
+            : f.multiline
+              ? `<textarea class="server-vpn-textarea" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" ${busy ? 'disabled' : ''}></textarea>`
+              : `<input class="search-input" type="${f.secret ? 'password' : 'text'}" data-server-vpn-field="${escapeHTML(serverId)}" data-vpn-field-key="${f.key}" placeholder="${escapeHTML(t(f.placeholder || ''))}" autocomplete="off" ${busy ? 'disabled' : ''}>`}
         </label>`).join('')}
     </div>
     <div class="server-vpn-actions">

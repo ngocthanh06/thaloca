@@ -362,6 +362,10 @@ export function OpenServerTerminal(arg1) {
   return window['go']['main']['App']['OpenServerTerminal'](arg1);
 }
 
+export function OpenSystemVPNSettings() {
+  return window['go']['main']['App']['OpenSystemVPNSettings']();
+}
+
 export function PickDownloadFolder() {
   return window['go']['main']['App']['PickDownloadFolder']();
 }

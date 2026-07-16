@@ -1619,6 +1619,20 @@ export namespace main {
 	        this.error = source["error"];
 	    }
 	}
+	export class VPNFieldOption {
+	    value: string;
+	    label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VPNFieldOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.label = source["label"];
+	    }
+	}
 	export class VPNFieldDef {
 	    key: string;
 	    label: string;
@@ -1627,6 +1641,8 @@ export namespace main {
 	    required?: boolean;
 	    multiline?: boolean;
 	    span: string;
+	    type?: string;
+	    options?: VPNFieldOption[];
 	
 	    static createFrom(source: any = {}) {
 	        return new VPNFieldDef(source);
@@ -1641,28 +1657,8 @@ export namespace main {
 	        this.required = source["required"];
 	        this.multiline = source["multiline"];
 	        this.span = source["span"];
-	    }
-	}
-	export class VPNEngineInfo {
-	    kind: string;
-	    name: string;
-	    installed: boolean;
-	    fields: VPNFieldDef[];
-	    binary: string;
-	    install_command?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new VPNEngineInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.name = source["name"];
-	        this.installed = source["installed"];
-	        this.fields = this.convertValues(source["fields"], VPNFieldDef);
-	        this.binary = source["binary"];
-	        this.install_command = source["install_command"];
+	        this.type = source["type"];
+	        this.options = this.convertValues(source["options"], VPNFieldOption);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1683,6 +1679,49 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class VPNEngineInfo {
+	    kind: string;
+	    name: string;
+	    installed: boolean;
+	    fields: VPNFieldDef[];
+	    binary: string;
+	    install_command?: string;
+	    install_blocked_reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VPNEngineInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.installed = source["installed"];
+	        this.fields = this.convertValues(source["fields"], VPNFieldDef);
+	        this.binary = source["binary"];
+	        this.install_command = source["install_command"];
+	        this.install_blocked_reason = source["install_blocked_reason"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	
 	export class VPNStatus {
 	    configured: boolean;

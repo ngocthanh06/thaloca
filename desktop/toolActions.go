@@ -51,6 +51,12 @@ var installSpecs = map[string]toolActionSpec{
 	"cargo":    {"brew", []string{"install", "rust"}},
 	"docker":   {"brew", []string{"install", "--cask", "docker"}},
 	"gitleaks": {"brew", []string{"install", "gitleaks"}},
+	// VPN engine CLIs (see ListVPNEngines): keyed by each engine's binary()
+	// name so the engine picker's one-click install resolves here.
+	// wireguard-tools also brings in wg-quick's own dependencies (wg,
+	// wireguard-go, and a modern bash).
+	"wg-quick": {"brew", []string{"install", "wireguard-tools"}},
+	"openvpn":  {"brew", []string{"install", "openvpn"}},
 	"trivy":    {"brew", []string{"install", "trivy"}},
 	"semgrep":  {"brew", []string{"install", "semgrep"}},
 	"clamscan": {"brew", []string{"install", "clamav"}},

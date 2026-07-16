@@ -1140,7 +1140,10 @@ function handleServerVPNSelectEngine(id: string, engineKind: string): void {
 // picker, via the same RunToolAction/confirm/poll flow the Tools tab uses
 // (desktop/toolActions.go) — the frontend never builds the actual install
 // command, only ever a (binary, "install") pair the backend looks up.
-let serverVPNInstallTimer: number | null = null
+// Keyed by server ID: two server panels can each be watching their own
+// install job at once, and one finishing (or re-starting) must never cancel
+// the other's polling.
+const serverVPNInstallTimers = new Map<string, number>()
 
 async function handleServerVPNInstallEngine(id: string, binary: string, name: string, installCommand: string): Promise<void> {
   const current = serverVPN.get(id)
@@ -1159,20 +1162,21 @@ async function handleServerVPNInstallEngine(id: string, binary: string, name: st
   serverVPN.set(id, { ...current, installing: { name, output: '', running: true, exitCode: 0 } })
   renderServers()
 
-  if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
-  serverVPNInstallTimer = window.setInterval(async () => {
+  const previous = serverVPNInstallTimers.get(id)
+  if (previous) window.clearInterval(previous)
+  const timer = window.setInterval(async () => {
     const status = await api.toolActionStatus(jobID)
     const latest = serverVPN.get(id)
     if (!latest) {
-      if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
-      serverVPNInstallTimer = null
+      window.clearInterval(timer)
+      serverVPNInstallTimers.delete(id)
       return
     }
     serverVPN.set(id, { ...latest, installing: { name, output: status.output, running: status.running, exitCode: status.exit_code, error: status.error } })
     renderServers()
     if (!status.running) {
-      if (serverVPNInstallTimer) window.clearInterval(serverVPNInstallTimer)
-      serverVPNInstallTimer = null
+      window.clearInterval(timer)
+      serverVPNInstallTimers.delete(id)
       // Refresh the engine list so the Installed flag (and the picker)
       // reflects reality once the install finishes.
       const engines = await api.listVPNEngines()
@@ -1181,6 +1185,7 @@ async function handleServerVPNInstallEngine(id: string, binary: string, name: st
       renderServers()
     }
   }, 700)
+  serverVPNInstallTimers.set(id, timer)
 }
 
 async function handleServerVPNSave(id: string, engineKind: string): Promise<void> {
@@ -1189,7 +1194,7 @@ async function handleServerVPNSave(id: string, engineKind: string): Promise<void
   const engine = current.engines?.find(e => e.kind === engineKind)
   if (!engine) return
 
-  const inputs = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(`[data-server-vpn-field="${CSS.escape(id)}"]`)
+  const inputs = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(`[data-server-vpn-field="${CSS.escape(id)}"]`)
   const values: Record<string, string> = {}
   const fieldsByKey = new Map(engine.fields.map(field => [field.key, field]))
   inputs.forEach(input => {
@@ -1924,7 +1929,7 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install], [data-open-vpn-settings]')
   if (!button) {
     // Source Control's Repositories tab: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -2350,6 +2355,15 @@ async function handleDocumentClick(event: Event) {
     ))) return
     try {
       await api.openHomebrewInstallInTerminal()
+    } catch (error) {
+      showError(String(error))
+    }
+    return
+  }
+
+  if (button.dataset.openVpnSettings !== undefined) {
+    try {
+      await api.openSystemVPNSettings()
     } catch (error) {
       showError(String(error))
     }

@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -24,6 +27,18 @@ type VPNFieldDef struct {
 	// of 4) — decided per engine here so the frontend renderer stays
 	// generic across every VPN protocol instead of hardcoding one's layout.
 	Span string `json:"span"`
+	// Type selects the input widget: "" renders a text input (or textarea
+	// when Multiline), "select" renders a dropdown of Options — used by the
+	// System VPN engine, whose one field picks an existing macOS VPN
+	// service rather than accepting free text.
+	Type    string           `json:"type,omitempty"`
+	Options []VPNFieldOption `json:"options,omitempty"`
+}
+
+// VPNFieldOption is one choice of a "select" VPNFieldDef.
+type VPNFieldOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 // VPNEngineInfo is one supported VPN protocol's metadata: whether its CLI
@@ -41,6 +56,11 @@ type VPNEngineInfo struct {
 	Fields         []VPNFieldDef `json:"fields"`
 	Binary         string        `json:"binary"`
 	InstallCommand string        `json:"install_command,omitempty"`
+	// InstallBlockedReason mirrors ToolInfo's field of the same name: set
+	// (instead of InstallCommand) when the engine's tool is missing but its
+	// installer (brew) is missing too, so the frontend explains the
+	// prerequisite instead of showing an install button that can only fail.
+	InstallBlockedReason string `json:"install_blocked_reason,omitempty"`
 }
 
 // VPNStatus is one server's VPN tunnel state, regardless of engine.
@@ -71,11 +91,12 @@ type vpnEngine interface {
 var vpnEngines = map[string]vpnEngine{
 	"wireguard": wireGuardEngine{},
 	"openvpn":   openVPNEngine{},
+	"system":    systemVPNEngine{},
 }
 
 // vpnEngineOrder is ListVPNEngines' fixed display order (map iteration
 // order isn't stable).
-var vpnEngineOrder = []string{"wireguard", "openvpn"}
+var vpnEngineOrder = []string{"wireguard", "openvpn", "system"}
 
 // vpnDir is where every server's VPN config lives, one (or more) files per
 // server — never inside servers.json itself, since a VPN config commonly
@@ -108,17 +129,18 @@ func vpnFileBase(serverID string) string {
 const vpnRunRoot = "/var/run/thaloca-vpn"
 
 // vpnRunDir is one server's root-owned staging directory: everything root
-// executes (bundled binaries) or reads (the VPN config) for this server's
-// tunnel is copied here and hash-verified first, and OpenVPN's pid/log
-// files are written here — never under the user-writable home directory.
+// executes (the engine's Homebrew-installed programs) or reads (the VPN
+// config) for this server's tunnel is copied here and hash-verified first,
+// and OpenVPN's pid/log files are written here — never under a
+// user-writable directory.
 func vpnRunDir(serverID string) string {
 	return vpnRunRoot + "/" + vpnFileBase(serverID)
 }
 
 // vpnStagedFile is one file the privileged staging script copies into a
 // server's run dir before executing anything from it. sha256 is the
-// expected content hash — computed from trusted bytes (the embedded
-// binaries, or config bytes this process just read and validated) — and is
+// expected content hash — computed from bytes this process just read (the
+// resolved Homebrew programs, or config bytes it validated) — and is
 // verified by root AFTER the copy lands in the root-owned directory, so a
 // same-user process rewriting the user-writable source mid-flight (while
 // the admin password dialog is open, say) can only make the connect abort,
@@ -139,7 +161,7 @@ func vpnStageScript(runDir string, files []vpnStagedFile) string {
 		"set -e",
 		"umask 022",
 		"rm -rf " + escapeOsascriptShellArg(runDir),
-		"mkdir -p " + escapeOsascriptShellArg(runDir+"/lib"),
+		"mkdir -p " + escapeOsascriptShellArg(runDir),
 	}
 	for _, f := range files {
 		dest := runDir + "/" + f.dest
@@ -153,31 +175,108 @@ func vpnStageScript(runDir string, files []vpnStagedFile) string {
 	return strings.Join(parts, "; ")
 }
 
-// vpnStagedBinaries builds staged-file entries for the named bundled
-// binaries plus every bundled dylib (staged under lib/, where the binaries'
-// rewritten @executable_path/lib load commands expect them), hashed from
-// the embedded copies inside the app binary itself.
-func vpnStagedBinaries(names ...string) ([]vpnStagedFile, error) {
-	dir, err := vpnBinDir()
-	if err != nil {
-		return nil, err
+// vpnTrustedPrefixes are the only Homebrew prefixes a VPN engine's programs
+// are accepted from, because those programs are run with administrator
+// privileges: the canonical prefix on Apple Silicon and Intel. The process's
+// PATH (extended from the user's login shell by fixPathForGUILaunch) is
+// deliberately NOT searched — it routinely contains per-user, freely
+// writable directories (~/.local/bin, version-manager shims, npm globals)
+// whose contents must never be handed to root. The Homebrew prefix is
+// itself writable by the admin user, so this is the same trust a plain
+// `sudo wg-quick`/`sudo openvpn` gives a Homebrew install — but no broader
+// than that.
+var vpnTrustedPrefixes = []string{"/opt/homebrew", "/usr/local"}
+
+// vpnEnginePrograms maps each engine kind to every program it hands to
+// root, and each program to the Homebrew formula whose keg the program's
+// real path must resolve into (see vpnResolveExecutable). The System VPN
+// engine deliberately has no entry: scutil ships with macOS and never runs
+// as root, so vpnEngineInstalled's empty loop correctly reports that
+// engine as always installed. wg-quick needs
+// its wg/wireguard-go siblings and a modern GNU bash (macOS's /bin/bash is
+// stuck on 3.2, too old for the `declare -A` wg-quick requires) — all
+// installed by `brew install wireguard-tools` via its dependencies.
+var vpnEnginePrograms = map[string]map[string]string{
+	"wireguard": {"wg-quick": "wireguard-tools", "wg": "wireguard-tools", "wireguard-go": "wireguard-go", "bash": "bash"},
+	"openvpn":   {"openvpn": "openvpn"},
+}
+
+// vpnResolveExecutable resolves one Homebrew-installed program: the name is
+// looked up in each trusted prefix's bin AND sbin (openvpn installs into
+// sbin), the symlink chain is fully resolved with filepath.EvalSymlinks,
+// and the real target must land inside that same prefix's Cellar keg for
+// the expected formula. A symlink in /opt/homebrew/bin pointing anywhere
+// else — a user-writable directory, another formula's keg — is rejected, so
+// only files Homebrew installed for that formula are ever handed to root.
+func vpnResolveExecutable(name, formula string) (string, error) {
+	for _, prefix := range vpnTrustedPrefixes {
+		for _, sub := range []string{"bin", "sbin"} {
+			link := filepath.Join(prefix, sub, name)
+			resolved, err := filepath.EvalSymlinks(link)
+			if err != nil {
+				continue
+			}
+			keg := filepath.Join(prefix, "Cellar", formula) + string(filepath.Separator)
+			if !strings.HasPrefix(resolved, keg) {
+				continue
+			}
+			if info, err := os.Stat(resolved); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+				return resolved, nil
+			}
+		}
 	}
+	return "", fmt.Errorf("%s (Homebrew formula %s) not found", name, formula)
+}
+
+// vpnEngineInstalled reports whether every program an engine hands to root
+// resolves into its expected Homebrew keg — the exact same check connect
+// and disconnect apply, so the frontend's Installed flag never diverges
+// from what a connect will actually accept.
+func vpnEngineInstalled(kind string) bool {
+	for name, formula := range vpnEnginePrograms[kind] {
+		if _, err := vpnResolveExecutable(name, formula); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// vpnStagedExecutables builds staged-file entries for every program an
+// engine hands to root: each is resolved into its Homebrew keg
+// (vpnResolveExecutable) and hashed NOW — before the admin password prompt —
+// and the privileged script then copies it into the root-owned run dir and
+// verifies that hash on the root-owned copy before anything executes it
+// (see vpnStageScript). Root only ever runs copies whose bytes match what
+// this process just read, so a same-user process swapping the Homebrew
+// file while the password dialog is open can only make the connect abort.
+// (The dylibs those programs load still come from the admin-writable
+// Homebrew prefix by absolute path — that residual is the same trust a
+// plain `sudo wg-quick` gives a Homebrew install.)
+func vpnStagedExecutables(kind string) ([]vpnStagedFile, error) {
+	programs := vpnEnginePrograms[kind]
+	names := make([]string, 0, len(programs))
+	for name := range programs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var files []vpnStagedFile
 	for _, name := range names {
-		sum, err := embeddedSHA256(vpnBinSourceDir + "/" + name)
+		src, err := vpnResolveExecutable(name, programs[name])
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, vpnStagedFile{src: filepath.Join(dir, name), dest: name, sha256: sum, mode: "755"})
-	}
-	for _, lib := range vpnLibNames {
-		sum, err := embeddedSHA256(vpnBinSourceDir + "/lib/" + lib)
+		data, err := os.ReadFile(src)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, vpnStagedFile{src: filepath.Join(dir, "lib", lib), dest: "lib/" + lib, sha256: sum, mode: "755"})
+		files = append(files, vpnStagedFile{src: src, dest: name, sha256: sha256Hex(data), mode: "755"})
 	}
 	return files, nil
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // ListVPNEngines reports every supported VPN protocol, whether its CLI
@@ -186,20 +285,21 @@ func (a *App) ListVPNEngines() []VPNEngineInfo {
 	infos := make([]VPNEngineInfo, 0, len(vpnEngineOrder))
 	for _, kind := range vpnEngineOrder {
 		e := vpnEngines[kind]
-		_, err := exec.LookPath(e.binary())
-		info := VPNEngineInfo{Kind: e.kind(), Name: e.name(), Installed: err == nil, Fields: e.fields(), Binary: e.binary()}
-		// installSpecs (toolActions.go) is keyed by binary name, which for
-		// engines that still need a separate install (currently only
-		// OpenVPN) is also the RunToolAction tool key the frontend passes to
-		// install it — same table the Tools tab uses, so this stays in sync
-		// without duplicating the brew formula/command here. WireGuard's
-		// binary() is a full bundled path (see vpnbin.go) that never matches
-		// a key in that map, so it never gets an InstallCommand here — it's
-		// always Installed once vpnBinDir() has extracted it, which
-		// exec.LookPath above (given an absolute path) confirms directly.
+		info := VPNEngineInfo{Kind: e.kind(), Name: e.name(), Installed: vpnEngineInstalled(kind), Fields: e.fields(), Binary: e.binary()}
+		// installSpecs (toolActions.go) is keyed by binary name, which is
+		// also the RunToolAction tool key the frontend passes to install it —
+		// same table the Tools tab uses, so this stays in sync without
+		// duplicating the brew formula/command here. Like the Tools tab
+		// (applyToolActionCommands), the install command is only offered when
+		// the installer itself (brew) is present; otherwise the reason is
+		// reported instead.
 		if !info.Installed {
 			if spec, ok := installSpecs[e.binary()]; ok {
-				info.InstallCommand = spec.display()
+				if _, brewErr := exec.LookPath(spec.Bin); brewErr == nil {
+					info.InstallCommand = spec.display()
+				} else {
+					info.InstallBlockedReason = installPrereqMessage(spec.Bin)
+				}
 			}
 		}
 		infos = append(infos, info)
@@ -319,8 +419,8 @@ func (a *App) ConnectServerVPN(serverID string) error {
 	if !ok {
 		return fmt.Errorf("no VPN configured for this server")
 	}
-	if _, err := exec.LookPath(e.binary()); err != nil {
-		return fmt.Errorf("%s not found — install it first", e.name())
+	if !vpnEngineInstalled(server.VPNType) {
+		return fmt.Errorf("%s not found — install it with Homebrew first", e.name())
 	}
 	if !e.configured(serverID) {
 		return fmt.Errorf("no VPN config saved for this server yet")

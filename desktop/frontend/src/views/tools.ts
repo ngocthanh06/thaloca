@@ -181,7 +181,7 @@ function renderPackageGroup(label: string, names: string[], isCask: boolean): st
 // blocked reason with a concrete next step we can offer a button for
 // (staging Homebrew's own install command in Terminal) rather than just
 // pointing the user at a URL to read on their own.
-const HOMEBREW_BLOCKED_REASON = 'Requires Homebrew — install it from https://brew.sh, then refresh this tab.'
+export const HOMEBREW_BLOCKED_REASON = 'Requires Homebrew — install it from https://brew.sh, then refresh this tab.'
 
 function renderToolCard(tool: ToolInfo): string {
   const action = !tool.installed && tool.install_command
