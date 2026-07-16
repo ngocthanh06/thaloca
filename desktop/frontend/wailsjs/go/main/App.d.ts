@@ -187,6 +187,8 @@ export function OpenServerTerminal(arg1:string):Promise<string>;
 
 export function OpenSystemVPNSettings():Promise<void>;
 
+export function PerformSelfUpdate(arg1:string):Promise<void>;
+
 export function PickDownloadFolder():Promise<string>;
 
 export function PickFolder():Promise<string>;

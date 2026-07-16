@@ -566,12 +566,19 @@ const vi: Record<string, string> = {
   'Could not save settings:': 'Không thể lưu cài đặt:',
   Updates: 'Cập nhật',
   Version: 'Phiên bản',
-  'Checking looks for a newer GitHub release. Installation stays manual because this build is not Developer ID signed or notarized.':
-    'Kiểm tra sẽ tìm bản phát hành GitHub mới hơn. Việc cài đặt vẫn thực hiện thủ công vì bản dựng này chưa được ký Developer ID hoặc công chứng.',
+  '"Update now" checks GitHub\'s SHA-256 and the app bundle before installing and restarting. This build is not Developer ID signed or notarized.':
+    '"Cập nhật ngay" kiểm tra SHA-256 của GitHub và gói ứng dụng trước khi cài đặt rồi khởi động lại. Bản dựng này chưa được ký Developer ID hoặc công chứng.',
   'Check for updates': 'Kiểm tra cập nhật',
   'Could not check for updates:': 'Không thể kiểm tra cập nhật:',
   'is available.': 'đã có sẵn.',
   'Open release page': 'Mở trang phát hành',
+  'Update now': 'Cập nhật ngay',
+  'Updating…': 'Đang cập nhật…',
+  'Could not update:': 'Không thể cập nhật:',
+  'Update Thaloca': 'Cập nhật Thaloca',
+  'Download and install': 'Tải xuống và cài đặt',
+  'The update will be verified first; then Thaloca will quit, replace the app, and reopen automatically.':
+    'Bản cập nhật sẽ được xác minh trước; sau đó Thaloca sẽ thoát, thay thế ứng dụng và tự động mở lại.',
   "You're on the latest version.": 'Bạn đang dùng phiên bản mới nhất.',
 }
 

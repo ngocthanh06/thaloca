@@ -366,6 +366,10 @@ export function OpenSystemVPNSettings() {
   return window['go']['main']['App']['OpenSystemVPNSettings']();
 }
 
+export function PerformSelfUpdate(arg1) {
+  return window['go']['main']['App']['PerformSelfUpdate'](arg1);
+}
+
 export function PickDownloadFolder() {
   return window['go']['main']['App']['PickDownloadFolder']();
 }

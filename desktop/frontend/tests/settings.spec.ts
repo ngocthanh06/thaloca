@@ -39,3 +39,34 @@ test('update results render remote version and errors as text, never HTML', asyn
   await expect(page.locator('.settings-section img')).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+test('Update now confirms and invokes the native self-update binding', async ({ page }) => {
+  await installMockApp(page)
+  await page.goto('/')
+  await page.evaluate(() => {
+    const app = (window as any).go.main.App
+    app.GetNotificationSettings = async () => ({ enabled: true })
+    app.GetAppVersion = async () => '0.1.5'
+    app.GetClipboardHistoryEnabled = async () => true
+    app.CheckForUpdate = async () => ({
+      current_version: '0.1.5', latest_version: '0.1.6', available: true,
+      release_url: 'https://github.com/ngocthanh06/thaloca/releases/tag/v0.1.6',
+    })
+    app.Confirm = async (title: string, message: string) => {
+      ;(window as any).__calls.push({ name: 'Confirm', args: [title, message] })
+      return true
+    }
+    app.PerformSelfUpdate = async (version: string) => {
+      ;(window as any).__calls.push({ name: 'PerformSelfUpdate', args: [version] })
+    }
+  })
+
+  await page.click('#settings-btn')
+  await page.click('[data-settings-check-update]')
+  await expect(page.locator('[data-settings-self-update]')).toHaveText('Update now')
+  await page.click('[data-settings-self-update]')
+
+  const calls = await page.evaluate(() => (window as any).__calls)
+  expect(calls.some((call: any) => call.name === 'Confirm' && call.args[1].includes('0.1.6'))).toBe(true)
+  expect(calls.some((call: any) => call.name === 'PerformSelfUpdate' && call.args[0] === '0.1.6')).toBe(true)
+})

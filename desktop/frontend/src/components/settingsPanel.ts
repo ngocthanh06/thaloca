@@ -21,6 +21,8 @@ let current = {
 let appVersion = ''
 let updateCheck: UpdateInfo | null = null
 let checkingForUpdate = false
+let selfUpdating = false
+let selfUpdateError = ''
 let clipboardHistoryEnabled = true
 
 export function initSettingsPanel(): void {
@@ -96,7 +98,7 @@ function render(): void {
       </section>
       <section class="settings-section">
         <h3>${t('Updates')}</h3>
-        <p class="resource-detail muted">${t('Version')} ${appVersion ? escapeHTML(appVersion) : '—'}. ${t('Checking looks for a newer GitHub release. Installation stays manual because this build is not Developer ID signed or notarized.')}</p>
+        <p class="resource-detail muted">${t('Version')} ${appVersion ? escapeHTML(appVersion) : '—'}. ${t('"Update now" checks GitHub\'s SHA-256 and the app bundle before installing and restarting. This build is not Developer ID signed or notarized.')}</p>
         <div class="settings-buttons">
           <button class="btn-secondary" data-settings-check-update ${checkingForUpdate ? 'disabled' : ''}>${checkingForUpdate ? t('Checking…') : t('Check for updates')}</button>
         </div>
@@ -123,9 +125,13 @@ function render(): void {
   root.querySelector('[data-settings-open-release]')?.addEventListener('click', () => {
     if (updateCheck?.release_url) BrowserOpenURL(updateCheck.release_url)
   })
+  root.querySelector('[data-settings-self-update]')?.addEventListener('click', () => void handleSelfUpdate())
 }
 
 function renderUpdateResult(): string {
+  if (selfUpdateError) {
+    return `<p class="resource-detail tool-action-failed">${t('Could not update:')} ${escapeHTML(selfUpdateError)}</p>`
+  }
   if (!updateCheck) return ''
   if (updateCheck.error) {
     return `<p class="resource-detail tool-action-failed">${t('Could not check for updates:')} ${escapeHTML(updateCheck.error)}</p>`
@@ -133,9 +139,29 @@ function renderUpdateResult(): string {
   if (updateCheck.available) {
     return `<p class="resource-detail">Thaloca ${escapeHTML(updateCheck.latest_version || '')} ${t('is available.')}
       <button class="btn-secondary" data-settings-open-release>${t('Open release page')}</button>
+      <button class="btn-primary" data-settings-self-update ${selfUpdating ? 'disabled' : ''}>${selfUpdating ? t('Updating…') : t('Update now')}</button>
     </p>`
   }
   return `<p class="resource-detail muted">${t("You're on the latest version.")}</p>`
+}
+
+async function handleSelfUpdate(): Promise<void> {
+  if (selfUpdating || !updateCheck?.available) return
+  const version = updateCheck.latest_version || ''
+  if (!(await api.confirmDialog(
+    t('Update Thaloca'),
+    `${t('Download and install')} Thaloca ${version}? ${t('The update will be verified first; then Thaloca will quit, replace the app, and reopen automatically.')}`,
+  ))) return
+  selfUpdating = true
+  selfUpdateError = ''
+  render()
+  try {
+    await api.performSelfUpdate(version)
+  } catch (error) {
+    selfUpdateError = String(error)
+    selfUpdating = false
+    render()
+  }
 }
 
 async function handleCheckForUpdate(): Promise<void> {

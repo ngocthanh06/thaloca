@@ -864,6 +864,7 @@ interface WailsApp {
   SetClipboardHistoryEnabled(enabled: boolean): Promise<void>
   GetAppVersion(): Promise<string>
   CheckForUpdate(): Promise<Partial<UpdateInfo>>
+  PerformSelfUpdate(expectedVersion: string): Promise<void>
   OpenInstalledApp(path: string): Promise<void>
   QuitInstalledApp(bundleId: string): Promise<void>
   DeleteInstalledApp(path: string): Promise<void>
@@ -1078,6 +1079,10 @@ export const api = {
     const fallback: UpdateInfo = { current_version: '', available: false }
     const fn = wailsApp()?.CheckForUpdate
     return fn ? fn().then(i => ({ ...fallback, ...i })) : Promise.resolve(fallback)
+  },
+  performSelfUpdate: (expectedVersion: string): Promise<void> => {
+    const fn = wailsApp()?.PerformSelfUpdate
+    return fn ? fn(expectedVersion) : Promise.reject(new Error('Wails runtime not available'))
   },
   refreshInstalledApps: (): Promise<InstalledApp[]> => wailsApp()?.RefreshInstalledApps?.() || Promise.resolve([]),
   openInstalledApp: (path: string): Promise<void> => {
