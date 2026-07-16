@@ -7073,6 +7073,7 @@ pre.diff {
 }
 
 .terminal-session-wrapper {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -7094,10 +7095,24 @@ pre.diff {
    trackLineBuffer in serverTerminal.ts) — only shown once it matches
    something, never gets in the way otherwise. */
 .terminal-suggest-bar {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  right: 18px;
   display: none;
   flex-wrap: wrap;
   gap: 6px;
-  padding-bottom: 8px;
+  width: fit-content;
+  max-width: calc(100% - 26px);
+  max-height: 96px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-light) 80%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, #0a0e17 92%, transparent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  backdrop-filter: blur(10px);
 }
 
 .terminal-suggest-bar.visible {

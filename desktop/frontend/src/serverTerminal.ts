@@ -26,6 +26,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { EventsOn } from '../wailsjs/runtime/runtime'
 import { api } from './api'
+import { terminalTheme } from './terminalTheme'
 
 export type ServerTerminalStatus = 'connecting' | 'open' | 'closed'
 
@@ -128,7 +129,7 @@ export async function openServerTerminal(
     convertEol: true,
     fontSize: 13,
     cursorBlink: true,
-    theme: { background: '#0a0e17' },
+    theme: terminalTheme,
   })
   const fitAddon = new FitAddon()
   term.loadAddon(fitAddon)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +71,12 @@ func (a *App) OpenServerTerminal(serverID string) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	args := append([]string{"-tt"}, sshBaseArgs(conn)...)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	// Apps launched from Finder/Launch Services inherit a much smaller
+	// environment than an interactive shell and may have no TERM at all.
+	// ssh forwards its local TERM value when it allocates the remote PTY, so
+	// set a capable terminal explicitly to keep ANSI colours and full-screen
+	// programs working exactly as they do in a normal terminal app.
+	cmd.Env = terminalEnvironment(os.Environ())
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		cancel()
@@ -94,6 +101,19 @@ func (a *App) OpenServerTerminal(serverID string) (string, error) {
 	go a.pumpServerTerminal(session)
 
 	return session.id, nil
+}
+
+// terminalEnvironment returns env with the terminal capability variables
+// replaced (rather than duplicated, whose precedence differs by program).
+func terminalEnvironment(env []string) []string {
+	result := make([]string, 0, len(env)+2)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "TERM=") || strings.HasPrefix(entry, "COLORTERM=") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return append(result, "TERM=xterm-256color", "COLORTERM=truecolor")
 }
 
 // pumpServerTerminal streams the session's PTY output to the frontend until

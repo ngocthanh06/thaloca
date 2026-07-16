@@ -92,7 +92,12 @@ func (a *App) OpenContainerTerminal(containerID string) (string, error) {
 	a.closeContainerTerminalFor(containerID)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-it", containerID, "sh", "-c", "command -v bash >/dev/null && exec bash || exec sh")
+	// docker exec otherwise inherits the container's often-missing/dumb TERM
+	// value. Advertise xterm's actual capabilities so shells and tools emit
+	// colours and true-colour escape sequences.
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-it",
+		"-e", "TERM=xterm-256color", "-e", "COLORTERM=truecolor",
+		containerID, "sh", "-c", "command -v bash >/dev/null && exec bash || exec sh")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		cancel()
