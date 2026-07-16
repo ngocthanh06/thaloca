@@ -418,6 +418,11 @@ function renderVPNPanel(server: ServerConnection, state: ServerVPNPanelState): s
       ? `<span class="status-badge status-unknown">${t('Configured — disconnected')}</span>`
       : `<span class="status-badge status-down">${t('Not configured')}</span>`
   const busy = state.busy !== ''
+  // A connected WireGuard/OpenVPN tunnel still needs its saved config to
+  // disconnect safely. A System VPN belongs to macOS, so changing or removing
+  // only this server's link must remain possible while the Mac-wide tunnel is
+  // connected (and must not stop that tunnel).
+  const configLocked = busy || (connected && server.vpn_type !== 'system')
 
   return `
     <div class="server-vpn">
@@ -434,12 +439,12 @@ function renderVPNPanel(server: ServerConnection, state: ServerVPNPanelState): s
 
       ${state.editing ? renderVPNEditing(serverId, state) : `
         <div class="server-vpn-actions">
-          <button class="btn-secondary" data-server-vpn-edit-start="${escapeHTML(serverId)}" ${busy || connected ? 'disabled' : ''} title="${connected ? t('Disconnect first') : ''}">${configured ? t('Replace config') : t('Add VPN config')}</button>
+          <button class="btn-secondary" data-server-vpn-edit-start="${escapeHTML(serverId)}" ${configLocked ? 'disabled' : ''} title="${connected && server.vpn_type !== 'system' ? t('Disconnect first') : ''}">${configured ? t('Replace config') : t('Add VPN config')}</button>
           ${configured ? `
             <button class="btn-secondary" data-server-vpn-connect-toggle="${escapeHTML(serverId)}" data-vpn-connected="${connected ? '1' : '0'}" ${busy ? 'disabled' : ''}>
               ${state.busy === 'connecting' ? t('Connecting…') : state.busy === 'disconnecting' ? t('Disconnecting…') : connected ? t('Disconnect') : t('Connect')}
             </button>
-            <button class="btn-secondary danger" data-server-vpn-remove="${escapeHTML(serverId)}" ${busy || connected ? 'disabled' : ''} title="${connected ? t('Disconnect first') : ''}">${state.busy === 'removing' ? t('Removing…') : t('Remove config')}</button>` : ''}
+            <button class="btn-secondary danger" data-server-vpn-remove="${escapeHTML(serverId)}" ${configLocked ? 'disabled' : ''} title="${connected && server.vpn_type !== 'system' ? t('Disconnect first') : ''}">${state.busy === 'removing' ? t('Removing…') : t('Remove config')}</button>` : ''}
         </div>`}
     </div>`
 }

@@ -448,8 +448,11 @@ const vi: Record<string, string> = {
   'Checking VPN status…': 'Đang kiểm tra trạng thái VPN…',
   'Configured — disconnected': 'Đã cấu hình — chưa kết nối',
   'Not configured': 'Chưa cấu hình',
-  'Some servers only answer SSH once their VPN tunnel is up. Set it up below, then Connect before checking/using it. Bringing the tunnel up or down needs an admin password each time — Thaloca never stores it.':
-    'Một số máy chủ chỉ trả lời SSH khi tunnel VPN đã bật. Cấu hình bên dưới, rồi bấm Connect trước khi kiểm tra/sử dụng. Mỗi lần bật/tắt tunnel đều cần mật khẩu quản trị Mac — Thaloca không lưu mật khẩu này.',
+  'This server is linked to a VPN managed by macOS. Connect/Disconnect switches that VPN for the whole Mac — no admin password needed.':
+    'Máy chủ này được liên kết với một VPN do macOS quản lý. Kết nối/Ngắt kết nối sẽ chuyển trạng thái VPN đó cho toàn bộ máy Mac — không cần mật khẩu quản trị.',
+  'Some servers only answer SSH once their VPN tunnel is up. Set it up below, then Connect before checking/using it. WireGuard/OpenVPN tunnels need an admin password each time — Thaloca never stores it.':
+    'Một số máy chủ chỉ trả lời SSH khi tunnel VPN đã bật. Cấu hình bên dưới, rồi bấm Kết nối trước khi kiểm tra/sử dụng. Tunnel WireGuard/OpenVPN cần mật khẩu quản trị mỗi lần bật hoặc tắt — Thaloca không lưu mật khẩu này.',
+  'Also linked to:': 'Cũng được liên kết với:',
   'not installed': 'chưa cài đặt',
   'Click to install': 'Bấm để cài đặt',
   'click to install': 'bấm để cài đặt',
@@ -486,6 +489,10 @@ const vi: Record<string, string> = {
   'Missing required field(s):': 'Thiếu trường bắt buộc:',
   'Disconnect VPN': 'Ngắt kết nối VPN',
   'Connect VPN': 'Kết nối VPN',
+  'Disconnect this macOS VPN? It is Mac-wide: the whole Mac loses this VPN, not just this server.':
+    'Ngắt kết nối VPN macOS này? Đây là VPN toàn máy: toàn bộ máy Mac sẽ mất kết nối VPN này, không chỉ máy chủ này.',
+  'Connect this macOS VPN? It is Mac-wide and affects the whole Mac, not just this server.':
+    'Kết nối VPN macOS này? Đây là VPN toàn máy và sẽ ảnh hưởng toàn bộ máy Mac, không chỉ máy chủ này.',
   "Bring this server's VPN tunnel down? This will prompt for your Mac admin password.":
     'Tắt tunnel VPN của máy chủ này? Việc này sẽ hỏi mật khẩu quản trị Mac của bạn.',
   "Bring this server's VPN tunnel up? This will prompt for your Mac admin password.":

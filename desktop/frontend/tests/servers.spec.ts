@@ -126,3 +126,27 @@ test('VPN engine buttons stay visible and allow switching protocols', async ({ p
   await expect(page.locator('[data-vpn-field-key="ovpnConfig"]')).toBeVisible()
   await expect(page.locator('[data-vpn-field-key="privateKey"]')).toHaveCount(0)
 })
+
+test('Connected System VPN can be replaced or unlinked without stopping the Mac-wide tunnel', async ({ page }) => {
+  await installMockApp(page)
+  await page.goto('/')
+  await page.evaluate(() => {
+    const app = (window as any).go.main.App
+    app.ListServers = async () => ([
+      { id: 'srv-1', name: 'API prod', host: '1.2.3.4', port: 22, user: 'ubuntu', key_path: '/keys/prod.pem', environment: 'production', vpn_enabled: true, vpn_type: 'system' },
+    ])
+    app.ServerVPNStatus = async () => ({ configured: true, connected: true, shared_with: ['Worker prod'] })
+    app.ListVPNEngines = async () => ([{
+      kind: 'system', name: 'System VPN', installed: true, binary: 'scutil',
+      fields: [{ key: 'serviceID', label: 'VPN configuration', required: true, span: 'wide', type: 'select', options: [{ value: 'vpn-1', label: 'Office (PPP:L2TP)' }] }],
+    }])
+  })
+
+  await page.click('.nav-btn[data-view="servers"]')
+  await page.click('[data-server-vpn-toggle="srv-1"]')
+
+  await expect(page.locator('[data-server-vpn-edit-start="srv-1"]')).toBeEnabled()
+  await expect(page.locator('[data-server-vpn-remove="srv-1"]')).toBeEnabled()
+  await expect(page.locator('.server-vpn')).toContainText('Worker prod')
+  await expect(page.locator('.server-vpn')).toContainText('no admin password needed')
+})

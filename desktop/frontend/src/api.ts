@@ -795,6 +795,7 @@ function normalizeServerVPNStatus(value: Partial<ServerVPNStatus> | null | undef
   return {
     configured: Boolean(value?.configured),
     connected: Boolean(value?.connected),
+    shared_with: Array.isArray(value?.shared_with) ? value.shared_with : [],
   }
 }
 
