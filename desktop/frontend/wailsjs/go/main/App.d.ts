@@ -9,9 +9,15 @@ export function ActivateContainerTerminal(arg1:string):Promise<void>;
 
 export function AddAssignees(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
+export function AddDocumentFolder(arg1:string):Promise<main.DocumentSnapshot>;
+
 export function AddServer(arg1:string,arg2:string,arg3:number,arg4:string,arg5:string,arg6:string,arg7:string):Promise<main.ServerConnection>;
 
 export function AppendTerminalHistory(arg1:string,arg2:string):Promise<void>;
+
+export function AskDocuments(arg1:string):Promise<main.DocumentAnswer>;
+
+export function CancelDocumentScan():Promise<boolean>;
 
 export function CheckForUpdate():Promise<main.UpdateInfo>;
 
@@ -62,6 +68,8 @@ export function DeleteInstalledApp(arg1:string):Promise<void>;
 export function DisableGitEvents(arg1:string):Promise<main.ActivitySummary>;
 
 export function DisconnectServerVPN(arg1:string):Promise<void>;
+
+export function DocumentLibrary():Promise<main.DocumentSnapshot>;
 
 export function DownloadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -175,6 +183,8 @@ export function Notify(arg1:string,arg2:string):Promise<void>;
 
 export function OpenContainerTerminal(arg1:string):Promise<string>;
 
+export function OpenDocument(arg1:string):Promise<void>;
+
 export function OpenFileAtLine(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function OpenHomebrewInstallInTerminal():Promise<void>;
@@ -188,6 +198,8 @@ export function OpenServerTerminal(arg1:string):Promise<string>;
 export function OpenSystemVPNSettings():Promise<void>;
 
 export function PerformSelfUpdate(arg1:string):Promise<void>;
+
+export function PickDocumentFolder():Promise<string>;
 
 export function PickDownloadFolder():Promise<string>;
 
@@ -221,11 +233,15 @@ export function RecentEvents(arg1:number):Promise<Array<main.TimelineEvent>>;
 
 export function RecordClipboardCopy(arg1:string,arg2:string):Promise<Array<main.ClipboardEntry>>;
 
+export function RefreshDocuments():Promise<main.DocumentSnapshot>;
+
 export function RefreshInstalledApps():Promise<Array<main.InstalledApp>>;
 
 export function RefreshTools():Promise<main.ToolsSnapshot>;
 
 export function RemoveAssignees(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
+
+export function RemoveDocumentFolder(arg1:string):Promise<main.DocumentSnapshot>;
 
 export function RemoveReviewers(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
@@ -267,6 +283,8 @@ export function RestartContainer(arg1:string):Promise<void>;
 
 export function RestartServerContainer(arg1:string,arg2:string):Promise<void>;
 
+export function RevealDocument(arg1:string):Promise<void>;
+
 export function RevealFileInFinder(arg1:string,arg2:string):Promise<void>;
 
 export function ReviewPullRequest(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
@@ -282,6 +300,8 @@ export function RunToolAction(arg1:string,arg2:string):Promise<string>;
 export function ScanContainerImage(arg1:string):Promise<security.Report>;
 
 export function SearchBrewPackages(arg1:string):Promise<Array<main.BrewSearchResult>>;
+
+export function SearchDocuments(arg1:string):Promise<Array<main.DocumentSearchHit>>;
 
 export function SearchLanguagePackages(arg1:string,arg2:string):Promise<Array<main.RegistryPackage>>;
 

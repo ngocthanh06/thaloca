@@ -155,6 +155,28 @@ export interface ContainerRuntimeStatus {
   homebrew_available: boolean
 }
 
+export interface DocumentRoot { path: string; added_at: string }
+export interface ManagedDocument {
+  id: string; root: string; path: string; relative_path: string; name: string; file_type: string; size: number; modified_at: number
+  content_hash?: string; tags: string[]; index_status: string; indexed_at?: string; error?: string; chunk_count: number
+}
+export interface LongbrainDocumentStatus {
+  installed: boolean; healthy: boolean; qdrant_healthy: boolean; llm_available: boolean
+  embedding_provider: string; embedding_model: string; embedding_local: boolean; llm_provider: string; llm_model: string; llm_local: boolean
+  url: string; install_url: string; message: string
+}
+export interface DocumentScanProgress {
+  phase: string; current_file?: string; discovered: number; pending: number; indexed: number; failed: number
+}
+export interface DocumentSnapshot {
+  roots: DocumentRoot[]; documents: ManagedDocument[]; longbrain: LongbrainDocumentStatus; scanning: boolean; scan_cancelled: boolean; last_scan_at?: string; scan_progress?: DocumentScanProgress
+}
+export interface DocumentSearchHit {
+  document_id: string; path: string; file_name: string; file_type: string; chunk_index: number; page?: number; line_start?: number; line_end?: number
+  paragraph_start?: number; paragraph_end?: number; heading?: string; text: string; score: number
+}
+export interface DocumentAnswer { answer: string; citations: DocumentSearchHit[] }
+
 // One config file (or, for category "telemetry", one setting read out of a
 // config file) shown in the Config Files view. Only "shell" entries can be
 // toggleable (and even then, only when their source line is guarded and
@@ -1024,6 +1046,16 @@ interface WailsApp {
   StartContainerRuntime(kind: string): Promise<void>
   StopContainerRuntime(kind: string): Promise<void>
   InstallColima(): Promise<void>
+  PickDocumentFolder(): Promise<string>
+  DocumentLibrary(): Promise<DocumentSnapshot>
+  AddDocumentFolder(path: string): Promise<DocumentSnapshot>
+  RemoveDocumentFolder(path: string): Promise<DocumentSnapshot>
+  RefreshDocuments(): Promise<DocumentSnapshot>
+  CancelDocumentScan(): Promise<boolean>
+  SearchDocuments(query: string): Promise<DocumentSearchHit[]>
+  AskDocuments(question: string): Promise<DocumentAnswer>
+  OpenDocument(path: string): Promise<void>
+  RevealDocument(path: string): Promise<void>
 }
 
 declare global {
@@ -1447,4 +1479,14 @@ export const api = {
   stopContainerRuntime: (kind: string): Promise<void> =>
     wailsApp()?.StopContainerRuntime?.(kind) || Promise.reject('native not available'),
   installColima: (): Promise<void> => wailsApp()?.InstallColima?.() || Promise.reject('native not available'),
+  pickDocumentFolder: (): Promise<string> => wailsApp()?.PickDocumentFolder?.() || Promise.resolve(''),
+  documentLibrary: (): Promise<DocumentSnapshot> => wailsApp()?.DocumentLibrary?.() || Promise.resolve({ roots: [], documents: [], longbrain: { installed: false, healthy: false, qdrant_healthy: false, llm_available: false, embedding_provider: '', embedding_model: '', embedding_local: false, llm_provider: '', llm_model: '', llm_local: false, url: 'http://localhost:8800', install_url: 'https://longbrain.cc.cd', message: 'LongBrain is not installed' }, scanning: false, scan_cancelled: false }),
+  addDocumentFolder: (path: string): Promise<DocumentSnapshot> => wailsApp()?.AddDocumentFolder?.(path) || Promise.reject('native not available'),
+  removeDocumentFolder: (path: string): Promise<DocumentSnapshot> => wailsApp()?.RemoveDocumentFolder?.(path) || Promise.reject('native not available'),
+  refreshDocuments: (): Promise<DocumentSnapshot> => wailsApp()?.RefreshDocuments?.() || Promise.reject('native not available'),
+  cancelDocumentScan: (): Promise<boolean> => wailsApp()?.CancelDocumentScan?.() || Promise.resolve(false),
+  searchDocuments: (query: string): Promise<DocumentSearchHit[]> => wailsApp()?.SearchDocuments?.(query) || Promise.resolve([]),
+  askDocuments: (question: string): Promise<DocumentAnswer> => wailsApp()?.AskDocuments?.(question) || Promise.reject('native not available'),
+  openDocument: (path: string): Promise<void> => wailsApp()?.OpenDocument?.(path) || Promise.reject('native not available'),
+  revealDocument: (path: string): Promise<void> => wailsApp()?.RevealDocument?.(path) || Promise.reject('native not available'),
 }

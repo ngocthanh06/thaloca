@@ -40,6 +40,18 @@ a project's manifest asking for a tool that isn't installed, and offers
 one-click Install/Update through Homebrew (with the exact command shown
 before running).
 
+**Documents** — manages folders of existing PDF, DOCX, TXT, and Markdown
+files without uploading or copying them. Thaloca scans the folders at startup
+and every minute, indexes changed files into its own `thaloca_documents`
+collection, and returns semantic matches with page/line/paragraph citations.
+Search and Ask AI use a separately installed
+[LongBrain (Hermes Agent)](https://longbrain.cc.cd) runtime. Thaloca only
+indexes with embedding providers verified as local, and only enables Ask AI
+for an explicit allowlist of local LLM providers; external or unknown
+providers remain blocked. When LongBrain is unavailable, Thaloca shows the
+installation guide and command and leaves dependent actions disabled. Thaloca
+never installs or modifies the Hermes Agent repository.
+
 **Servers** — SSH-managed remote hosts: structured health checks (polled
 automatically in the background, with a notification if a server drops
 offline or its CPU/memory/disk stays under pressure), key permission

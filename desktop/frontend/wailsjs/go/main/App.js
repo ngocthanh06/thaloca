@@ -10,12 +10,24 @@ export function AddAssignees(arg1, arg2, arg3) {
   return window['go']['main']['App']['AddAssignees'](arg1, arg2, arg3);
 }
 
+export function AddDocumentFolder(arg1) {
+  return window['go']['main']['App']['AddDocumentFolder'](arg1);
+}
+
 export function AddServer(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['AddServer'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
 export function AppendTerminalHistory(arg1, arg2) {
   return window['go']['main']['App']['AppendTerminalHistory'](arg1, arg2);
+}
+
+export function AskDocuments(arg1) {
+  return window['go']['main']['App']['AskDocuments'](arg1);
+}
+
+export function CancelDocumentScan() {
+  return window['go']['main']['App']['CancelDocumentScan']();
 }
 
 export function CheckForUpdate() {
@@ -116,6 +128,10 @@ export function DisableGitEvents(arg1) {
 
 export function DisconnectServerVPN(arg1) {
   return window['go']['main']['App']['DisconnectServerVPN'](arg1);
+}
+
+export function DocumentLibrary() {
+  return window['go']['main']['App']['DocumentLibrary']();
 }
 
 export function DownloadServerFile(arg1, arg2, arg3) {
@@ -342,6 +358,10 @@ export function OpenContainerTerminal(arg1) {
   return window['go']['main']['App']['OpenContainerTerminal'](arg1);
 }
 
+export function OpenDocument(arg1) {
+  return window['go']['main']['App']['OpenDocument'](arg1);
+}
+
 export function OpenFileAtLine(arg1, arg2, arg3) {
   return window['go']['main']['App']['OpenFileAtLine'](arg1, arg2, arg3);
 }
@@ -368,6 +388,10 @@ export function OpenSystemVPNSettings() {
 
 export function PerformSelfUpdate(arg1) {
   return window['go']['main']['App']['PerformSelfUpdate'](arg1);
+}
+
+export function PickDocumentFolder() {
+  return window['go']['main']['App']['PickDocumentFolder']();
 }
 
 export function PickDownloadFolder() {
@@ -434,6 +458,10 @@ export function RecordClipboardCopy(arg1, arg2) {
   return window['go']['main']['App']['RecordClipboardCopy'](arg1, arg2);
 }
 
+export function RefreshDocuments() {
+  return window['go']['main']['App']['RefreshDocuments']();
+}
+
 export function RefreshInstalledApps() {
   return window['go']['main']['App']['RefreshInstalledApps']();
 }
@@ -444,6 +472,10 @@ export function RefreshTools() {
 
 export function RemoveAssignees(arg1, arg2, arg3) {
   return window['go']['main']['App']['RemoveAssignees'](arg1, arg2, arg3);
+}
+
+export function RemoveDocumentFolder(arg1) {
+  return window['go']['main']['App']['RemoveDocumentFolder'](arg1);
 }
 
 export function RemoveReviewers(arg1, arg2, arg3) {
@@ -526,6 +558,10 @@ export function RestartServerContainer(arg1, arg2) {
   return window['go']['main']['App']['RestartServerContainer'](arg1, arg2);
 }
 
+export function RevealDocument(arg1) {
+  return window['go']['main']['App']['RevealDocument'](arg1);
+}
+
 export function RevealFileInFinder(arg1, arg2) {
   return window['go']['main']['App']['RevealFileInFinder'](arg1, arg2);
 }
@@ -556,6 +592,10 @@ export function ScanContainerImage(arg1) {
 
 export function SearchBrewPackages(arg1) {
   return window['go']['main']['App']['SearchBrewPackages'](arg1);
+}
+
+export function SearchDocuments(arg1) {
+  return window['go']['main']['App']['SearchDocuments'](arg1);
 }
 
 export function SearchLanguagePackages(arg1, arg2) {

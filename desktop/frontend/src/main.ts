@@ -41,6 +41,7 @@ import {
   toggleRepoSelected, selectAllRepos, selectNoRepos, setSecurityRepoFilter, getSelectedRepoPaths,
 } from './views/security'
 import { initLogsView, renderLogsView, stopLogsPolling } from './views/logs'
+import { initDocumentsView, loadDocumentsView } from './views/documents'
 import { openServiceInspector, closeServiceInspector, runServiceAction } from './components/serviceInspector'
 import { initCommandPalette, setCommandPaletteIndex, type CommandItem } from './components/commandPalette'
 import { initSettingsPanel, openSettingsPanel } from './components/settingsPanel'
@@ -215,6 +216,7 @@ function renderApp() {
             </svg>
             <span>${t('Security')}</span>
           </button>
+          <button class="nav-btn" data-view="documents"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h6l2 2h8v14H4z"/><path d="M8 11h8M8 15h6"/></svg><span>Documents</span></button>
         </nav>
         <div class="local-status">
           <div class="pulse"></div>
@@ -364,6 +366,7 @@ function renderApp() {
         <section id="security-view" class="view">
           <div id="security-content"></div>
         </section>
+        <section id="documents-view" class="view"><div id="documents-content"></div></section>
 
       </main>
       <aside id="inspector-panel" class="inspector-panel"></aside>
@@ -377,7 +380,7 @@ function switchView(view: string) {
   document.querySelectorAll('.nav-btn, .view').forEach(el => el.classList.remove('active'))
   document.querySelector(`.nav-btn[data-view="${view}"]`)?.classList.add('active')
   document.getElementById(`${view}-view`)?.classList.add('active')
-  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security') }
+  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security'), documents: 'Documents' }
   document.getElementById('view-title')!.textContent = titles[view] || view
   closeServiceInspector()
 
@@ -407,6 +410,7 @@ function switchView(view: string) {
   if (view === 'servers') {
     void loadServers()
   }
+  if (view === 'documents') void loadDocumentsView()
 
   // Managed Logs only polls its currently-selected source while its own tab
   // is visible — leaving the tab stops the interval instead of tailing a
@@ -455,6 +459,7 @@ function applyLocaleToShell(): void {
     overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'),
     resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'),
     security: t('Security'),
+    documents: 'Documents',
   }
   Object.entries(navLabels).forEach(([view, label]) => setText(`.nav-btn[data-view="${view}"] span`, label))
 
@@ -1589,6 +1594,7 @@ function bindEvents() {
   initCommandPalette()
   initSettingsPanel()
   initClipboardHistoryPanel()
+  initDocumentsView()
   document.addEventListener('thaloca:refresh', () => { void refreshRuntime() })
   // views/sourceControl.ts dispatches this after a fetch/pull/push/stash —
   // ahead/behind/changed counts live in `activity`, owned here.
@@ -1868,6 +1874,7 @@ function rebuildCommandIndex(): void {
     { id: 'view:tools', label: `${t('Go to')} ${t('Tools')}`, kind: 'view', run: () => switchView('tools') },
     { id: 'view:servers', label: `${t('Go to')} ${t('Servers')}`, kind: 'view', run: () => switchView('servers') },
     { id: 'view:logs', label: `${t('Go to')} ${t('Logs')}`, kind: 'view', run: () => switchView('logs') },
+    { id: 'view:documents', label: `${t('Go to')} Documents`, kind: 'view', run: () => switchView('documents') },
     {
       id: 'view:config-files', label: `${t('Go to')} ${t('Config Files')}`, kind: 'view', run: () => {
         switchView('tools')

@@ -593,6 +593,227 @@ export namespace main {
 	        this.used_percent = source["used_percent"];
 	    }
 	}
+	export class DocumentSearchHit {
+	    document_id: string;
+	    path: string;
+	    file_name: string;
+	    file_type: string;
+	    chunk_index: number;
+	    page?: number;
+	    line_start?: number;
+	    line_end?: number;
+	    paragraph_start?: number;
+	    paragraph_end?: number;
+	    heading: string;
+	    text: string;
+	    score: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentSearchHit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.document_id = source["document_id"];
+	        this.path = source["path"];
+	        this.file_name = source["file_name"];
+	        this.file_type = source["file_type"];
+	        this.chunk_index = source["chunk_index"];
+	        this.page = source["page"];
+	        this.line_start = source["line_start"];
+	        this.line_end = source["line_end"];
+	        this.paragraph_start = source["paragraph_start"];
+	        this.paragraph_end = source["paragraph_end"];
+	        this.heading = source["heading"];
+	        this.text = source["text"];
+	        this.score = source["score"];
+	    }
+	}
+	export class DocumentAnswer {
+	    answer: string;
+	    citations: DocumentSearchHit[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentAnswer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.answer = source["answer"];
+	        this.citations = this.convertValues(source["citations"], DocumentSearchHit);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DocumentRoot {
+	    path: string;
+	    added_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentRoot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.added_at = source["added_at"];
+	    }
+	}
+	export class DocumentScanProgress {
+	    phase: string;
+	    current_file?: string;
+	    discovered: number;
+	    pending: number;
+	    indexed: number;
+	    failed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentScanProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.phase = source["phase"];
+	        this.current_file = source["current_file"];
+	        this.discovered = source["discovered"];
+	        this.pending = source["pending"];
+	        this.indexed = source["indexed"];
+	        this.failed = source["failed"];
+	    }
+	}
+	
+	export class LongbrainDocumentStatus {
+	    installed: boolean;
+	    healthy: boolean;
+	    qdrant_healthy: boolean;
+	    llm_available: boolean;
+	    embedding_provider: string;
+	    embedding_model: string;
+	    embedding_local: boolean;
+	    llm_provider: string;
+	    llm_model: string;
+	    llm_local: boolean;
+	    url: string;
+	    install_url: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LongbrainDocumentStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.healthy = source["healthy"];
+	        this.qdrant_healthy = source["qdrant_healthy"];
+	        this.llm_available = source["llm_available"];
+	        this.embedding_provider = source["embedding_provider"];
+	        this.embedding_model = source["embedding_model"];
+	        this.embedding_local = source["embedding_local"];
+	        this.llm_provider = source["llm_provider"];
+	        this.llm_model = source["llm_model"];
+	        this.llm_local = source["llm_local"];
+	        this.url = source["url"];
+	        this.install_url = source["install_url"];
+	        this.message = source["message"];
+	    }
+	}
+	export class ManagedDocument {
+	    id: string;
+	    root: string;
+	    path: string;
+	    relative_path: string;
+	    name: string;
+	    file_type: string;
+	    size: number;
+	    modified_at: number;
+	    content_hash?: string;
+	    tags: string[];
+	    index_status: string;
+	    indexed_at?: string;
+	    error?: string;
+	    chunk_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedDocument(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.root = source["root"];
+	        this.path = source["path"];
+	        this.relative_path = source["relative_path"];
+	        this.name = source["name"];
+	        this.file_type = source["file_type"];
+	        this.size = source["size"];
+	        this.modified_at = source["modified_at"];
+	        this.content_hash = source["content_hash"];
+	        this.tags = source["tags"];
+	        this.index_status = source["index_status"];
+	        this.indexed_at = source["indexed_at"];
+	        this.error = source["error"];
+	        this.chunk_count = source["chunk_count"];
+	    }
+	}
+	export class DocumentSnapshot {
+	    roots: DocumentRoot[];
+	    documents: ManagedDocument[];
+	    longbrain: LongbrainDocumentStatus;
+	    scanning: boolean;
+	    scan_cancelled: boolean;
+	    last_scan_at?: string;
+	    scan_progress: DocumentScanProgress;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentSnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.roots = this.convertValues(source["roots"], DocumentRoot);
+	        this.documents = this.convertValues(source["documents"], ManagedDocument);
+	        this.longbrain = this.convertValues(source["longbrain"], LongbrainDocumentStatus);
+	        this.scanning = source["scanning"];
+	        this.scan_cancelled = source["scan_cancelled"];
+	        this.last_scan_at = source["last_scan_at"];
+	        this.scan_progress = this.convertValues(source["scan_progress"], DocumentScanProgress);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class EnvFileSummary {
 	    project_path: string;
 	    project_name: string;
@@ -818,6 +1039,8 @@ export namespace main {
 	        this.processes = source["processes"];
 	    }
 	}
+	
+	
 	export class MemoryStats {
 	    total_bytes: number;
 	    used_bytes: number;

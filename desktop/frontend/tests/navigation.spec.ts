@@ -11,7 +11,7 @@ test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page
   await page.waitForSelector('.nav-btn')
 
   const navLabels = await page.locator('.nav-btn span').allTextContents()
-  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Resources', 'Tools', 'Servers', 'Logs', 'Security'])
+  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Resources', 'Tools', 'Servers', 'Logs', 'Security', 'Documents'])
 
   await page.click('.nav-btn[data-view="runtime"]')
   const subtabLabels = await page.locator('#services-subtabs .subtab').allTextContents()

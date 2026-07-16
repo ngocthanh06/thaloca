@@ -148,6 +148,26 @@ export async function installMockApp(page: Page): Promise<void> {
             return (window as any).__containerRuntimeStatus || { engines: [], multiple_running: false, homebrew_available: false }
           },
           StopContainerRuntime: async (kind: string) => { record('StopContainerRuntime', kind) },
+          PickDocumentFolder: async () => '/docs',
+          DocumentLibrary: async () => (window as any).__documentSnapshot || ({
+            roots: [], documents: [],
+            longbrain: { installed: false, healthy: false, qdrant_healthy: false, llm_available: false, embedding_provider: '', embedding_model: '', embedding_local: false, llm_provider: '', llm_model: '', llm_local: false, url: 'http://localhost:8800', install_url: 'https://longbrain.cc.cd', message: 'LongBrain is not installed or not running' },
+            scanning: false, scan_cancelled: false,
+          }),
+          AddDocumentFolder: async (path: string) => { record('AddDocumentFolder', path); return (window as any).__documentSnapshot },
+          RemoveDocumentFolder: async (path: string) => { record('RemoveDocumentFolder', path); return (window as any).__documentSnapshot },
+          RefreshDocuments: async () => { record('RefreshDocuments'); return (window as any).__documentSnapshot },
+          CancelDocumentScan: async () => { record('CancelDocumentScan'); return true },
+          SearchDocuments: async (query: string) => {
+            record('SearchDocuments', query)
+            return (window as any).__documentHits || []
+          },
+          AskDocuments: async (query: string) => {
+            record('AskDocuments', query)
+            return (window as any).__documentAnswer || { answer: '', citations: [] }
+          },
+          OpenDocument: async (path: string) => { record('OpenDocument', path) },
+          RevealDocument: async (path: string) => { record('RevealDocument', path) },
         },
       },
     }

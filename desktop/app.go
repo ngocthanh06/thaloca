@@ -162,6 +162,14 @@ type App struct {
 	appsMu     sync.Mutex
 	appsCache  []InstalledApp
 	appsCached bool
+
+	documentScanMu        sync.Mutex
+	documentScanCancel    context.CancelFunc
+	documentScanning      bool
+	documentScanCancelled bool
+	documentLastScanAt    time.Time
+	documentScanProgress  DocumentScanProgress
+	documentProgressEmit  time.Time
 }
 
 func NewApp() *App {
@@ -227,6 +235,11 @@ func (a *App) Startup(ctx context.Context) {
 	// it in the background rather than making the first Resources visit
 	// pay for it.
 	go a.RefreshInstalledApps()
+
+	// Managed document folders are scanned once at startup and then every
+	// minute. The scanner is a Thaloca feature; LongBrain is only an optional
+	// local runtime dependency and its repository is never modified.
+	go a.pollDocumentsLoop()
 
 	// Server reachability is polled independently of the Servers tab being
 	// open, so a server going offline can be noticed and notified about
