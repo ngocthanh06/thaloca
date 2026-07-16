@@ -426,7 +426,10 @@ function renderVPNPanel(server: ServerConnection, state: ServerVPNPanelState): s
         ${configured && configuredEngine ? `<span class="resource-detail muted">${escapeHTML(configuredEngine.name)}</span>` : ''}
         ${statusBadge}
       </div>
-      <p class="resource-detail muted">${t('Some servers only answer SSH once their VPN tunnel is up. Set it up below, then Connect before checking/using it. Bringing the tunnel up or down needs an admin password each time — Thaloca never stores it.')}</p>
+      <p class="resource-detail muted">${configured && server.vpn_type === 'system'
+        ? t('This server is linked to a VPN managed by macOS. Connect/Disconnect switches that VPN for the whole Mac — no admin password needed.')
+        : t('Some servers only answer SSH once their VPN tunnel is up. Set it up below, then Connect before checking/using it. WireGuard/OpenVPN tunnels need an admin password each time — Thaloca never stores it.')}</p>
+      ${(state.status?.shared_with || []).length ? `<p class="resource-detail muted">${t('Also linked to:')} ${escapeHTML((state.status?.shared_with || []).join(', '))}</p>` : ''}
       ${state.error ? `<p class="resource-detail tool-action-failed">${escapeHTML(state.error)}</p>` : ''}
 
       ${state.editing ? renderVPNEditing(serverId, state) : `
@@ -505,14 +508,17 @@ function renderVPNEditing(serverId: string, state: ServerVPNPanelState): string 
   const engine = engines.find(e => e.kind === state.selectedEngine)
   if (!engine) return ''
   // A select field with no options can't be filled in — for the System VPN
-  // engine that means no VPN is configured in macOS yet, so replace the
-  // form with an explanation and a button opening the system's own VPN
-  // settings (the only place such a VPN can be created).
+  // engine that means no VPN is configured in macOS yet (or reading the
+  // list failed: options_error), so replace the form with the explanation
+  // and a button opening the system's own VPN settings (the only place
+  // such a VPN can be created).
   const emptySelect = engine.fields.find(f => f.type === 'select' && !(f.options || []).length)
   if (emptySelect) {
     return `
       ${enginePicker}
-      <p class="resource-detail muted">${t('No VPN configurations found in macOS System Settings. Create one there first (e.g. L2TP/IPsec or IKEv2), including its password, then reopen this panel.')}</p>
+      ${emptySelect.options_error
+        ? `<p class="resource-detail tool-action-failed">${escapeHTML(t(emptySelect.options_error))}</p>`
+        : `<p class="resource-detail muted">${t('No VPN configurations found in macOS System Settings. Create one there first (e.g. L2TP/IPsec or IKEv2), including its password, then reopen this panel.')}</p>`}
       <div class="server-vpn-actions">
         <button class="btn-secondary" data-open-vpn-settings>${t('Open VPN Settings…')}</button>
         <button class="btn-secondary" data-server-vpn-edit-cancel="${escapeHTML(serverId)}" ${busy ? 'disabled' : ''}>${t('Cancel')}</button>

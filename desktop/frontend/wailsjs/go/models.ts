@@ -1643,6 +1643,7 @@ export namespace main {
 	    span: string;
 	    type?: string;
 	    options?: VPNFieldOption[];
+	    options_error?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VPNFieldDef(source);
@@ -1659,6 +1660,7 @@ export namespace main {
 	        this.span = source["span"];
 	        this.type = source["type"];
 	        this.options = this.convertValues(source["options"], VPNFieldOption);
+	        this.options_error = source["options_error"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1726,6 +1728,7 @@ export namespace main {
 	export class VPNStatus {
 	    configured: boolean;
 	    connected: boolean;
+	    shared_with?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new VPNStatus(source);
@@ -1735,6 +1738,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.configured = source["configured"];
 	        this.connected = source["connected"];
+	        this.shared_with = source["shared_with"];
 	    }
 	}
 

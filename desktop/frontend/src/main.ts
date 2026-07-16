@@ -1228,12 +1228,26 @@ async function handleServerVPNConnectToggle(id: string, connected: boolean): Pro
   const current = serverVPN.get(id)
   if (!current || current.busy) return
   const action = connected ? 'disconnect' : 'connect'
-  if (!(await api.confirmDialog(
-    connected ? t('Disconnect VPN') : t('Connect VPN'),
-    connected
+  // A System VPN is macOS's own, Mac-wide tunnel: no admin password is
+  // involved, and disconnecting it also affects every other server linked
+  // to the same VPN (shared_with, reported by ServerVPNStatus) — say so
+  // instead of the per-server WireGuard/OpenVPN wording.
+  const isSystemVPN = servers.find(s => s.id === id)?.vpn_type === 'system'
+  const sharedWith = current.status?.shared_with || []
+  let message: string
+  if (isSystemVPN) {
+    message = connected
+      ? t('Disconnect this macOS VPN? It is Mac-wide: the whole Mac loses this VPN, not just this server.')
+      : t('Connect this macOS VPN? It is Mac-wide and affects the whole Mac, not just this server.')
+    if (connected && sharedWith.length) {
+      message += `\n\n${t('Also linked to:')} ${sharedWith.join(', ')}`
+    }
+  } else {
+    message = connected
       ? t('Bring this server\'s VPN tunnel down? This will prompt for your Mac admin password.')
-      : t('Bring this server\'s VPN tunnel up? This will prompt for your Mac admin password.'),
-  ))) return
+      : t('Bring this server\'s VPN tunnel up? This will prompt for your Mac admin password.')
+  }
+  if (!(await api.confirmDialog(connected ? t('Disconnect VPN') : t('Connect VPN'), message))) return
   serverVPN.set(id, { ...current, busy: connected ? 'disconnecting' : 'connecting', error: undefined })
   renderServers()
   try {

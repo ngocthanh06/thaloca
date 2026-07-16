@@ -216,7 +216,9 @@ func (a *App) RemoveServer(id string) error {
 			filtered = append(filtered, s)
 			continue
 		}
-		if e, ok := vpnEngines[s.VPNType]; ok && e.connected(id) {
+		// vpnTeardownNeedsConfig: a System VPN link may be removed while the
+		// Mac-wide tunnel stays up — macOS itself can always disconnect it.
+		if e, ok := vpnEngines[s.VPNType]; ok && vpnTeardownNeedsConfig(s.VPNType) && e.connected(id) {
 			return fmt.Errorf("disconnect the VPN before removing this server")
 		}
 	}

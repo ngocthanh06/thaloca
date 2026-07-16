@@ -508,6 +508,7 @@ export interface VPNFieldDef {
   span: 'wide' | 'half' | 'narrow'
   type?: 'select'
   options?: VPNFieldOption[]
+  options_error?: string
 }
 
 export interface VPNFieldOption {
@@ -528,6 +529,7 @@ export interface VPNEngineInfo {
 export interface ServerVPNStatus {
   configured: boolean
   connected: boolean
+  shared_with?: string[]
 }
 
 export interface RemoteContainerStatus {

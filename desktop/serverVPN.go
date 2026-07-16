@@ -33,6 +33,11 @@ type VPNFieldDef struct {
 	// service rather than accepting free text.
 	Type    string           `json:"type,omitempty"`
 	Options []VPNFieldOption `json:"options,omitempty"`
+	// OptionsError explains why Options could not be built (e.g. scutil
+	// failed) — distinct from an empty Options list, which legitimately
+	// means "nothing configured yet". The frontend shows it instead of the
+	// no-options guidance.
+	OptionsError string `json:"options_error,omitempty"`
 }
 
 // VPNFieldOption is one choice of a "select" VPNFieldDef.
@@ -70,6 +75,11 @@ type VPNEngineInfo struct {
 type VPNStatus struct {
 	Configured bool `json:"configured"`
 	Connected  bool `json:"connected"`
+	// SharedWith names the OTHER servers linked to the same tunnel, for
+	// engines where one tunnel can back several servers (currently only the
+	// System VPN engine, whose tunnel is Mac-wide) — the frontend warns
+	// before a disconnect that would affect them too.
+	SharedWith []string `json:"shared_with,omitempty"`
 }
 
 // vpnEngine is implemented once per supported VPN protocol (see
@@ -321,7 +331,7 @@ func (a *App) SetServerVPNConfig(serverID, engineKind string, values map[string]
 	if !ok {
 		return fmt.Errorf("unknown server")
 	}
-	if current, ok := vpnEngines[server.VPNType]; ok && current.connected(serverID) {
+	if current, ok := vpnEngines[server.VPNType]; ok && vpnTeardownNeedsConfig(server.VPNType) && current.connected(serverID) {
 		return fmt.Errorf("disconnect the VPN before replacing its config")
 	}
 	if err := e.save(serverID, values); err != nil {
@@ -338,7 +348,7 @@ func (a *App) RemoveServerVPNConfig(serverID string) error {
 	if !ok {
 		return fmt.Errorf("unknown server")
 	}
-	if e, ok := vpnEngines[server.VPNType]; ok && e.connected(serverID) {
+	if e, ok := vpnEngines[server.VPNType]; ok && vpnTeardownNeedsConfig(server.VPNType) && e.connected(serverID) {
 		return fmt.Errorf("disconnect the VPN before removing its config")
 	}
 	if err := removeVPNFiles(serverID); err != nil {
@@ -399,8 +409,21 @@ func (a *App) ServerVPNStatus(serverID string) (VPNStatus, error) {
 	if !ok || !e.configured(serverID) {
 		return VPNStatus{}, nil
 	}
-	return VPNStatus{Configured: true, Connected: e.connected(serverID)}, nil
+	status := VPNStatus{Configured: true, Connected: e.connected(serverID)}
+	if server.VPNType == "system" {
+		status.SharedWith = systemVPNSharedWith(serverID)
+	}
+	return status, nil
 }
+
+// vpnTeardownNeedsConfig reports whether an engine's tunnel can only be
+// torn down through Thaloca's own saved config (WireGuard/OpenVPN, whose
+// tunnels this app created and must be able to undo). The System VPN
+// engine's tunnel belongs to macOS itself — it can always be disconnected
+// from System Settings or the menu bar — so unlinking a server never has
+// to force the Mac-wide tunnel down first, which may be in use by other
+// servers (or the user directly).
+func vpnTeardownNeedsConfig(kind string) bool { return kind != "system" }
 
 // ConnectServerVPN brings a server's VPN tunnel up via whichever engine
 // it's configured with. Every engine's connect() needs admin privileges to

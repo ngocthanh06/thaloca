@@ -73,8 +73,9 @@ func parseSystemVPNList(out string) []systemVPNService {
 // fields returns the single select field, its options rebuilt from
 // `scutil --nc list` on every call — ListVPNEngines runs when the panel
 // opens, so the picker always reflects what's currently configured in
-// System Settings. An error (or no services) just yields an empty options
-// list; the frontend explains and offers the Open VPN Settings button.
+// System Settings. A scutil failure is reported through OptionsError, so
+// the frontend shows the real error rather than pretending no VPN exists;
+// a genuinely empty list gets the Open VPN Settings guidance instead.
 func (systemVPNEngine) fields() []VPNFieldDef {
 	field := VPNFieldDef{
 		Key:      "serviceID",
@@ -83,10 +84,13 @@ func (systemVPNEngine) fields() []VPNFieldDef {
 		Required: true,
 		Span:     "wide",
 	}
-	if services, err := listSystemVPNServices(); err == nil {
-		for _, s := range services {
-			field.Options = append(field.Options, VPNFieldOption{Value: s.ID, Label: s.Name + " (" + s.Type + ")"})
-		}
+	services, err := listSystemVPNServices()
+	if err != nil {
+		field.OptionsError = "Could not read the system's VPN list: " + err.Error()
+		return []VPNFieldDef{field}
+	}
+	for _, s := range services {
+		field.Options = append(field.Options, VPNFieldOption{Value: s.ID, Label: s.Name + " (" + s.Type + ")"})
 	}
 	return []VPNFieldDef{field}
 }
@@ -253,6 +257,28 @@ func (e systemVPNEngine) disconnect(serverID string) error {
 		return fmt.Errorf("scutil --nc stop: %s", combinedOutputTail(out, stopErr))
 	}
 	return nil
+}
+
+// systemVPNSharedWith returns the names of every OTHER server linked to
+// the same system VPN service as serverID — the tunnel is Mac-wide, so
+// disconnecting it here also "disconnects" them; ServerVPNStatus exposes
+// this so the frontend can warn before doing that.
+func systemVPNSharedWith(serverID string) []string {
+	cfg, err := systemVPNEngine{}.loadConfig(serverID)
+	if err != nil {
+		return nil
+	}
+	var shared []string
+	for _, s := range loadServers() {
+		if s.ID == serverID || s.VPNType != "system" {
+			continue
+		}
+		other, otherErr := systemVPNEngine{}.loadConfig(s.ID)
+		if otherErr == nil && other.ServiceID == cfg.ServiceID {
+			shared = append(shared, s.Name)
+		}
+	}
+	return shared
 }
 
 // OpenSystemVPNSettings opens macOS's network settings, where system VPNs
