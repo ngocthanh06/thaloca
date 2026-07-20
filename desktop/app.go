@@ -168,8 +168,24 @@ type App struct {
 	documentScanning      bool
 	documentScanCancelled bool
 	documentLastScanAt    time.Time
+	documentScanStartedAt time.Time
 	documentScanProgress  DocumentScanProgress
 	documentProgressEmit  time.Time
+
+	// captures state (see desktop/captures.go): the last resolved macOS
+	// capture location and directory listing, used by the poll loop to
+	// detect new screenshots/recordings, plus a lazy thumbnail cache
+	// keyed by file path (initialized lazily in CaptureThumbnail).
+	capturesMu       sync.Mutex
+	capturesLocation string
+	capturesLast     []CaptureFile
+	captureThumbMu   sync.Mutex
+	captureThumbs    map[string]captureThumb
+
+	// Tracks threshold transitions so an ongoing high-RAM/disk condition
+	// produces one timeline event instead of another event every minute.
+	localPressureMu sync.Mutex
+	localPressure   map[string]bool
 }
 
 func NewApp() *App {
@@ -240,6 +256,11 @@ func (a *App) Startup(ctx context.Context) {
 	// minute. The scanner is a Thaloca feature; LongBrain is only an optional
 	// local runtime dependency and its repository is never modified.
 	go a.pollDocumentsLoop()
+
+	// The macOS capture folder is polled on a short tick (one readdir) so a
+	// fresh screenshot/recording shows up in the Captures view within
+	// seconds without an fsnotify dependency.
+	go a.pollCapturesLoop()
 
 	// Server reachability is polled independently of the Servers tab being
 	// open, so a server going offline can be noticed and notified about

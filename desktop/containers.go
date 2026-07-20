@@ -86,6 +86,26 @@ func (a *App) ContainerLogs(containerID string) string {
 	return truncateLogOutput(output)
 }
 
+// ContainerSize returns a container's disk usage as Docker's own
+// human-readable string (e.g. "1.2MB (virtual 245MB)"), fetched lazily per
+// row from the Runtime view (see runtime.ts's loadContainerSizes) rather
+// than folded into the main Snapshot scan — `docker ps -s` has to compute
+// each container's writable-layer size on the fly, which would slow down
+// every 30s Runtime poll for every container if it ran there instead.
+func (a *App) ContainerSize(containerID string) (string, error) {
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return "", fmt.Errorf("container id is empty")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "docker", "ps", "-a", "-s", "--filter", "id="+containerID, "--format", "{{.Size}}").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // ProjectLogs returns the combined, interleaved log tail of every container
 // in a Docker Compose project ("docker compose logs" prefixes each line
 // with its service name, which is exactly the unified view a project-level

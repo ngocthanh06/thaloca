@@ -16,27 +16,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
-	documentCollection   = "thaloca_documents"
-	documentProjectID    = "thaloca"
-	documentInstallURL   = "https://longbrain.cc.cd"
-	longbrainURL         = "http://localhost:8800"
-	qdrantURL            = "http://localhost:6333"
-	longbrainContainer   = "longbrain-llamaindex"
-	maxDocumentChunk     = 2800
-	maxDocumentFileBytes = 50 << 20
+	documentCollection       = "thaloca_documents"
+	documentEmbeddingProfile = "document"
+	documentChunkerVersion   = "v1-2800"
+	documentProjectID        = "thaloca"
+	documentInstallURL       = "https://longbrain.cc.cd"
+	longbrainURL             = "http://localhost:8800"
+	qdrantURL                = "http://localhost:6333"
+	longbrainContainer       = "longbrain-llamaindex"
+	maxDocumentChunk         = 2800
+	maxDocumentFileBytes     = 20 << 20
+	maxDocumentPDFPages      = 200
+	maxDocumentPPTXSlides    = 150
+	maxDocumentIndexChunks   = 120
+	// Office files are ZIP containers; cap the XML selected for extraction
+	// independently of compressed file size to reject highly-compressed ZIP
+	// bombs before allocating their expanded text.
+	maxDocumentExpandedXMLBytes = 64 << 20
 )
 
 var supportedDocumentExtensions = map[string]bool{
-	".pdf": true, ".docx": true, ".txt": true, ".md": true, ".markdown": true,
+	".docx": true, ".txt": true, ".md": true, ".markdown": true,
+	".pdf": true, ".pptx": true,
 }
 
 var ignoredDocumentDirectories = map[string]bool{
@@ -48,6 +61,7 @@ var ignoredDocumentDirectories = map[string]bool{
 type DocumentRoot struct {
 	Path    string `json:"path"`
 	AddedAt string `json:"added_at"`
+	Name    string `json:"name,omitempty"`
 }
 
 type ManagedDocument struct {
@@ -68,32 +82,38 @@ type ManagedDocument struct {
 }
 
 type DocumentLibrary struct {
-	Roots             []DocumentRoot    `json:"roots"`
-	Documents         []ManagedDocument `json:"documents"`
-	PendingDeletes    []string          `json:"pending_deletes,omitempty"`
-	EmbeddingProvider string            `json:"embedding_provider,omitempty"`
-	EmbeddingModel    string            `json:"embedding_model,omitempty"`
+	Roots                []DocumentRoot    `json:"roots"`
+	Documents            []ManagedDocument `json:"documents"`
+	ExcludedPaths        []string          `json:"excluded_paths,omitempty"`
+	PendingDeletes       []string          `json:"pending_deletes,omitempty"`
+	EmbeddingProvider    string            `json:"embedding_provider,omitempty"`
+	EmbeddingModel       string            `json:"embedding_model,omitempty"`
+	EmbeddingDimension   int               `json:"embedding_dimension,omitempty"`
+	EmbeddingFingerprint string            `json:"embedding_fingerprint,omitempty"`
 }
 
 type LongbrainDocumentStatus struct {
-	Installed         bool   `json:"installed"`
-	Healthy           bool   `json:"healthy"`
-	QdrantHealthy     bool   `json:"qdrant_healthy"`
-	LLMAvailable      bool   `json:"llm_available"`
-	EmbeddingProvider string `json:"embedding_provider"`
-	EmbeddingModel    string `json:"embedding_model"`
-	EmbeddingLocal    bool   `json:"embedding_local"`
-	LLMProvider       string `json:"llm_provider"`
-	LLMModel          string `json:"llm_model"`
-	LLMLocal          bool   `json:"llm_local"`
-	URL               string `json:"url"`
-	InstallURL        string `json:"install_url"`
-	Message           string `json:"message"`
+	Installed            bool   `json:"installed"`
+	Healthy              bool   `json:"healthy"`
+	QdrantHealthy        bool   `json:"qdrant_healthy"`
+	LLMAvailable         bool   `json:"llm_available"`
+	EmbeddingProvider    string `json:"embedding_provider"`
+	EmbeddingModel       string `json:"embedding_model"`
+	EmbeddingDimension   int    `json:"embedding_dimension"`
+	EmbeddingFingerprint string `json:"embedding_fingerprint"`
+	EmbeddingLocal       bool   `json:"embedding_local"`
+	LLMProvider          string `json:"llm_provider"`
+	LLMModel             string `json:"llm_model"`
+	LLMLocal             bool   `json:"llm_local"`
+	URL                  string `json:"url"`
+	InstallURL           string `json:"install_url"`
+	Message              string `json:"message"`
 }
 
 type DocumentSnapshot struct {
 	Roots         []DocumentRoot          `json:"roots"`
 	Documents     []ManagedDocument       `json:"documents"`
+	ExcludedPaths []string                `json:"excluded_paths"`
 	Longbrain     LongbrainDocumentStatus `json:"longbrain"`
 	Scanning      bool                    `json:"scanning"`
 	ScanCancelled bool                    `json:"scan_cancelled"`
@@ -102,18 +122,31 @@ type DocumentSnapshot struct {
 }
 
 type DocumentScanProgress struct {
-	Phase       string `json:"phase"`
-	CurrentFile string `json:"current_file,omitempty"`
-	Discovered  int    `json:"discovered"`
-	Pending     int    `json:"pending"`
-	Indexed     int    `json:"indexed"`
-	Failed      int    `json:"failed"`
+	Phase             string                         `json:"phase"`
+	CurrentFile       string                         `json:"current_file,omitempty"`
+	Discovered        int                            `json:"discovered"`
+	Pending           int                            `json:"pending"`
+	Indexed           int                            `json:"indexed"`
+	Failed            int                            `json:"failed"`
+	TotalChunks       int                            `json:"total_chunks"`
+	CacheHits         int                            `json:"cache_hits"`
+	CacheMisses       int                            `json:"cache_misses"`
+	EmbeddingRequests int                            `json:"embedding_requests"`
+	EmbeddingMS       int64                          `json:"embedding_ms"`
+	ElapsedMS         int64                          `json:"elapsed_ms"`
+	EmbeddingBatches  []DocumentEmbeddingBatchMetric `json:"embedding_batches,omitempty"`
+}
+
+type DocumentEmbeddingBatchMetric struct {
+	Texts      int   `json:"texts"`
+	DurationMS int64 `json:"duration_ms"`
 }
 
 type DocumentChunk struct {
 	Text           string `json:"text"`
 	ChunkIndex     int    `json:"chunk_index"`
 	Page           *int   `json:"page,omitempty"`
+	Slide          *int   `json:"slide,omitempty"`
 	LineStart      *int   `json:"line_start,omitempty"`
 	LineEnd        *int   `json:"line_end,omitempty"`
 	ParagraphStart *int   `json:"paragraph_start,omitempty"`
@@ -128,6 +161,7 @@ type DocumentSearchHit struct {
 	FileType       string  `json:"file_type"`
 	ChunkIndex     int     `json:"chunk_index"`
 	Page           *int    `json:"page"`
+	Slide          *int    `json:"slide"`
 	LineStart      *int    `json:"line_start"`
 	LineEnd        *int    `json:"line_end"`
 	ParagraphStart *int    `json:"paragraph_start"`
@@ -146,6 +180,14 @@ type pendingDocumentIndex struct {
 	doc    ManagedDocument
 	chunks []DocumentChunk
 	hash   string
+}
+
+type documentEmbeddingResult struct {
+	Vectors     [][]float64
+	Fingerprint string
+	CacheHits   int
+	CacheMisses int
+	Batches     []DocumentEmbeddingBatchMetric
 }
 
 var documentLibraryMu sync.Mutex
@@ -183,6 +225,9 @@ func loadDocumentLibrary() DocumentLibrary {
 	}
 	if library.PendingDeletes == nil {
 		library.PendingDeletes = []string{}
+	}
+	if library.ExcludedPaths == nil {
+		library.ExcludedPaths = []string{}
 	}
 	return library
 }
@@ -238,7 +283,7 @@ func normalizedProvider(provider string) string {
 
 func localEmbeddingProvider(provider string) bool {
 	switch normalizedProvider(provider) {
-	case "fastembed", "sentence-transformers", "sentence_transformers":
+	case "fastembed", "huggingface", "ollama", "sentence-transformers", "sentence_transformers":
 		return true
 	default:
 		return false
@@ -262,16 +307,26 @@ func detectLongbrain(ctx context.Context) LongbrainDocumentStatus {
 		defer resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			var health struct {
-				EmbeddingProvider string `json:"embed_provider"`
-				EmbeddingModel    string `json:"embed_model"`
-				LLMProvider       string `json:"llm_provider"`
-				LLMModel          string `json:"llm_model"`
+				EmbeddingProvider  string `json:"embed_provider"`
+				EmbeddingModel     string `json:"embed_model"`
+				EmbeddingDimension int    `json:"embed_dim"`
+				DocumentProvider   string `json:"doc_embed_provider"`
+				DocumentModel      string `json:"doc_embed_model"`
+				DocumentDimension  int    `json:"doc_embed_dim"`
+				DocumentReady      bool   `json:"doc_embedder_ready"`
+				LLMProvider        string `json:"llm_provider"`
+				LLMModel           string `json:"llm_model"`
 			}
 			_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&health)
 			status.Installed, status.Healthy, status.Message = true, true, "LongBrain connected"
-			status.EmbeddingProvider, status.EmbeddingModel = health.EmbeddingProvider, health.EmbeddingModel
+			status.EmbeddingProvider = health.DocumentProvider
+			if status.EmbeddingProvider == "" {
+				status.EmbeddingProvider = health.EmbeddingProvider
+			}
+			status.EmbeddingModel, status.EmbeddingDimension = health.DocumentModel, health.DocumentDimension
+			status.EmbeddingFingerprint = embeddingFingerprint(health.DocumentProvider, health.DocumentModel, health.DocumentDimension)
 			status.LLMProvider, status.LLMModel = health.LLMProvider, health.LLMModel
-			status.EmbeddingLocal = localEmbeddingProvider(health.EmbeddingProvider)
+			status.EmbeddingLocal = health.DocumentReady && localEmbeddingProvider(status.EmbeddingProvider)
 			status.LLMAvailable, status.LLMLocal = health.LLMModel != "", localLLMProvider(health.LLMProvider)
 		}
 	}
@@ -304,7 +359,62 @@ func requireLongbrainDocuments() (LongbrainDocumentStatus, error) {
 }
 
 func documentEmbeddingConfigurationChanged(library DocumentLibrary, status LongbrainDocumentStatus) bool {
-	return len(library.Documents) > 0 && (library.EmbeddingProvider != status.EmbeddingProvider || library.EmbeddingModel != status.EmbeddingModel)
+	if len(library.Documents) == 0 {
+		return false
+	}
+	if library.EmbeddingFingerprint != "" && status.EmbeddingFingerprint != "" {
+		return library.EmbeddingFingerprint != status.EmbeddingFingerprint
+	}
+	if library.EmbeddingModel != status.EmbeddingModel {
+		return true
+	}
+	libraryDimension := library.EmbeddingDimension
+	if libraryDimension == 0 {
+		libraryDimension = embeddingFingerprintDimension(library.EmbeddingFingerprint)
+	}
+	return libraryDimension > 0 && status.EmbeddingDimension > 0 && libraryDimension != status.EmbeddingDimension
+}
+
+func prepareDocumentEmbeddingMigration(library *DocumentLibrary, status LongbrainDocumentStatus) error {
+	oldDimension := library.EmbeddingDimension
+	if oldDimension == 0 {
+		oldDimension = embeddingFingerprintDimension(library.EmbeddingFingerprint)
+	}
+	if oldDimension > 0 && status.EmbeddingDimension > 0 && oldDimension != status.EmbeddingDimension {
+		return fmt.Errorf("LongBrain embedding dimension changed from %d to %d; the existing document index was preserved because it cannot safely mix vector dimensions", oldDimension, status.EmbeddingDimension)
+	}
+	for index := range library.Documents {
+		doc := &library.Documents[index]
+		if doc.IndexStatus != "indexed" {
+			continue
+		}
+		doc.ContentHash = ""
+		doc.IndexedAt = ""
+		doc.ChunkCount = 0
+		doc.IndexStatus = "pending"
+		doc.Error = "embedding model changed; reindex required"
+	}
+	library.EmbeddingProvider = status.EmbeddingProvider
+	library.EmbeddingModel = status.EmbeddingModel
+	library.EmbeddingDimension = status.EmbeddingDimension
+	library.EmbeddingFingerprint = status.EmbeddingFingerprint
+	return nil
+}
+
+func embeddingFingerprint(provider, model string, dimension int) string {
+	if strings.TrimSpace(provider) == "" || strings.TrimSpace(model) == "" || dimension <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s:%d", provider, model, dimension)
+}
+
+func embeddingFingerprintDimension(fingerprint string) int {
+	separator := strings.LastIndex(fingerprint, ":")
+	if separator < 0 || separator == len(fingerprint)-1 {
+		return 0
+	}
+	dimension, _ := strconv.Atoi(fingerprint[separator+1:])
+	return dimension
 }
 
 func (a *App) DocumentLibrary() DocumentSnapshot {
@@ -326,7 +436,59 @@ func (a *App) documentSnapshot(library DocumentLibrary, status LongbrainDocument
 	if !last.IsZero() {
 		lastScan = last.UTC().Format(time.RFC3339)
 	}
-	return DocumentSnapshot{Roots: library.Roots, Documents: library.Documents, Longbrain: status, Scanning: scanning, ScanCancelled: cancelled, LastScanAt: lastScan, ScanProgress: progress}
+	return DocumentSnapshot{Roots: library.Roots, Documents: library.Documents, ExcludedPaths: library.ExcludedPaths, Longbrain: status, Scanning: scanning, ScanCancelled: cancelled, LastScanAt: lastScan, ScanProgress: progress}
+}
+
+func (a *App) ExcludeDocument(path string) (DocumentSnapshot, error) {
+	path, err := normalizedDocumentRoot(path)
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	if err := a.stopDocumentScanAndWait(); err != nil {
+		return DocumentSnapshot{}, err
+	}
+	documentLibraryMu.Lock()
+	library := loadDocumentLibrary()
+	library.ExcludedPaths = appendUnique(library.ExcludedPaths, path)
+	docs := library.Documents[:0]
+	for _, doc := range library.Documents {
+		if sameDocumentPath(doc.Path, path) {
+			library.PendingDeletes = appendUnique(library.PendingDeletes, doc.ID)
+		} else {
+			docs = append(docs, doc)
+		}
+	}
+	library.Documents = docs
+	err = saveDocumentLibrary(library)
+	documentLibraryMu.Unlock()
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	a.startDocumentScanAsync()
+	return a.DocumentLibrary(), nil
+}
+
+func (a *App) RestoreExcludedDocument(path string) (DocumentSnapshot, error) {
+	path, err := normalizedDocumentRoot(path)
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	documentLibraryMu.Lock()
+	library := loadDocumentLibrary()
+	kept := library.ExcludedPaths[:0]
+	for _, excluded := range library.ExcludedPaths {
+		if !sameDocumentPath(excluded, path) {
+			kept = append(kept, excluded)
+		}
+	}
+	library.ExcludedPaths = kept
+	err = saveDocumentLibrary(library)
+	documentLibraryMu.Unlock()
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	a.startDocumentScanAsync()
+	return a.DocumentLibrary(), nil
 }
 
 func (a *App) PickDocumentFolder() (string, error) {
@@ -370,7 +532,47 @@ func (a *App) AddDocumentFolder(path string) (DocumentSnapshot, error) {
 	return a.DocumentLibrary(), nil
 }
 
+// RenameDocumentFolder changes only the friendly label shown by Thaloca.
+// It never renames, moves, re-scans, or re-indexes the directory itself.
+func (a *App) RenameDocumentFolder(path, name string) (DocumentSnapshot, error) {
+	path, err := normalizedDocumentRoot(path)
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DocumentSnapshot{}, fmt.Errorf("folder name is required")
+	}
+	if utf8.RuneCountInString(name) > 80 {
+		return DocumentSnapshot{}, fmt.Errorf("folder name must be 80 characters or fewer")
+	}
+	documentLibraryMu.Lock()
+	library := loadDocumentLibrary()
+	found := false
+	for index := range library.Roots {
+		if sameDocumentPath(library.Roots[index].Path, path) {
+			library.Roots[index].Name = name
+			found = true
+			break
+		}
+	}
+	if !found {
+		documentLibraryMu.Unlock()
+		return DocumentSnapshot{}, fmt.Errorf("document folder is not managed")
+	}
+	err = saveDocumentLibrary(library)
+	documentLibraryMu.Unlock()
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
+	return a.DocumentLibrary(), nil
+}
+
 func (a *App) RemoveDocumentFolder(path string) (DocumentSnapshot, error) {
+	path, err := normalizedDocumentRoot(path)
+	if err != nil {
+		return DocumentSnapshot{}, err
+	}
 	if err := a.stopDocumentScanAndWait(); err != nil {
 		return DocumentSnapshot{}, err
 	}
@@ -378,30 +580,55 @@ func (a *App) RemoveDocumentFolder(path string) (DocumentSnapshot, error) {
 	library := loadDocumentLibrary()
 	roots := library.Roots[:0]
 	removed := []ManagedDocument{}
+	foundRoot := false
 	for _, root := range library.Roots {
-		if root.Path != path {
+		if !sameDocumentPath(root.Path, path) {
 			roots = append(roots, root)
+		} else {
+			foundRoot = true
 		}
 	}
 	docs := library.Documents[:0]
 	for _, doc := range library.Documents {
-		if doc.Root == path {
+		if sameDocumentPath(doc.Root, path) {
 			removed = append(removed, doc)
 		} else {
 			docs = append(docs, doc)
 		}
 	}
+	if !foundRoot {
+		documentLibraryMu.Unlock()
+		return a.DocumentLibrary(), nil
+	}
 	library.Roots, library.Documents = roots, docs
 	for _, doc := range removed {
 		library.PendingDeletes = appendUnique(library.PendingDeletes, doc.ID)
 	}
-	err := saveDocumentLibrary(library)
+	err = saveDocumentLibrary(library)
 	documentLibraryMu.Unlock()
 	if err != nil {
 		return DocumentSnapshot{}, err
 	}
 	a.startDocumentScanAsync()
 	return a.DocumentLibrary(), nil
+}
+
+func normalizedDocumentRoot(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("document folder is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func sameDocumentPath(left, right string) bool {
+	leftPath, leftErr := normalizedDocumentRoot(left)
+	rightPath, rightErr := normalizedDocumentRoot(right)
+	return leftErr == nil && rightErr == nil && leftPath == rightPath
 }
 
 func (a *App) beginDocumentScan() (context.Context, bool) {
@@ -416,6 +643,7 @@ func (a *App) beginDocumentScan() (context.Context, bool) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	a.documentScanning, a.documentScanCancelled, a.documentScanCancel = true, false, cancel
+	a.documentScanStartedAt = time.Now()
 	a.documentScanProgress = DocumentScanProgress{Phase: "discovering"}
 	a.documentProgressEmit = time.Time{}
 	a.documentScanMu.Unlock()
@@ -432,6 +660,7 @@ func (a *App) finishDocumentScan(cancelled bool) {
 	}
 	a.documentScanning, a.documentScanCancelled, a.documentScanCancel, a.documentLastScanAt = false, cancelled, nil, time.Now()
 	a.documentScanProgress.Phase, a.documentScanProgress.CurrentFile = "complete", ""
+	a.documentScanProgress.ElapsedMS = time.Since(a.documentScanStartedAt).Milliseconds()
 	if cancelled {
 		a.documentScanProgress.Phase = "cancelled"
 	}
@@ -475,7 +704,7 @@ func (a *App) startDocumentScanAsync() bool {
 		return false
 	}
 	go func() {
-		_, cancelled, _ := a.refreshDocuments(ctx)
+		_, cancelled, _ := a.refreshDocuments(ctx, true)
 		a.finishDocumentScan(cancelled)
 	}()
 	return true
@@ -502,7 +731,7 @@ func (a *App) stopDocumentScanAndWait() error {
 }
 
 func (a *App) pollDocumentsLoop() {
-	_, _ = a.RefreshDocuments()
+	_, _ = a.refreshDocumentsAutomatically()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -510,7 +739,7 @@ func (a *App) pollDocumentsLoop() {
 		case <-a.ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = a.RefreshDocuments()
+			_, _ = a.refreshDocumentsAutomatically()
 		}
 	}
 }
@@ -523,13 +752,26 @@ func (a *App) RefreshDocuments() (DocumentSnapshot, error) {
 	if !started {
 		return a.DocumentLibrary(), nil
 	}
-	snapshot, cancelled, err := a.refreshDocuments(ctx)
+	snapshot, cancelled, err := a.refreshDocuments(ctx, true)
 	a.finishDocumentScan(cancelled)
 	snapshot.Scanning, snapshot.ScanCancelled = false, cancelled
 	return snapshot, err
 }
 
-func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, error) {
+func (a *App) refreshDocumentsAutomatically() (DocumentSnapshot, error) {
+	if _, err := requireLongbrainDocuments(); err != nil {
+		return a.DocumentLibrary(), err
+	}
+	ctx, started := a.beginDocumentScan()
+	if !started {
+		return a.DocumentLibrary(), nil
+	}
+	snapshot, cancelled, err := a.refreshDocuments(ctx, false)
+	a.finishDocumentScan(cancelled)
+	return snapshot, err
+}
+
+func (a *App) refreshDocuments(ctx context.Context, retryFailed bool) (DocumentSnapshot, bool, error) {
 	status := detectLongbrain(ctx)
 	documentLibraryMu.Lock()
 	library := loadDocumentLibrary()
@@ -538,19 +780,48 @@ func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, err
 		return a.documentSnapshot(library, status), false, fmt.Errorf("document indexing requires a verified local embedding provider")
 	}
 	if documentEmbeddingConfigurationChanged(library, status) {
-		if err := deleteDocumentCollection(ctx); err != nil {
-			return a.documentSnapshot(library, status), false, fmt.Errorf("reset document index after embedding model change: %w", err)
+		// Re-embed in place when the collection's vector dimension is compatible.
+		// Existing Qdrant points remain searchable until their deterministic IDs
+		// are overwritten, so a crash or temporary embedding failure loses no
+		// indexed data. Persist the target fingerprint first so the next scan can
+		// resume rather than getting trapped on the same mismatch forever.
+		if err := prepareDocumentEmbeddingMigration(&library, status); err != nil {
+			return a.documentSnapshot(library, status), false, err
 		}
-		library.PendingDeletes = []string{}
-		for index := range library.Documents {
-			library.Documents[index].ContentHash = ""
-			library.Documents[index].IndexedAt = ""
-			library.Documents[index].ChunkCount = 0
-			library.Documents[index].IndexStatus = "pending"
-			library.Documents[index].Error = "embedding model changed; reindex required"
+		if err := saveDocumentLibrary(library); err != nil {
+			return a.documentSnapshot(library, status), false, fmt.Errorf("save embedding migration checkpoint: %w", err)
 		}
 	}
-	library.EmbeddingProvider, library.EmbeddingModel = status.EmbeddingProvider, status.EmbeddingModel
+	if expected := indexedDocumentChunkCount(library); expected > 0 {
+		actual, err := documentCollectionPointCount(ctx)
+		if err != nil {
+			return a.documentSnapshot(library, status), false, fmt.Errorf("verify document index: %w", err)
+		}
+		if actual != expected {
+			for index := range library.Documents {
+				doc := &library.Documents[index]
+				if doc.IndexStatus != "indexed" || doc.ChunkCount <= 0 {
+					continue
+				}
+				stored, countErr := documentCollectionDocumentPointCount(ctx, doc.ID)
+				if countErr != nil {
+					return a.documentSnapshot(library, status), false, fmt.Errorf("verify document %s index: %w", doc.Name, countErr)
+				}
+				if stored == doc.ChunkCount {
+					continue
+				}
+				doc.ContentHash = ""
+				doc.IndexedAt = ""
+				doc.ChunkCount = 0
+				doc.IndexStatus = "pending"
+				doc.Error = fmt.Sprintf("document index is incomplete (%d chunks found); reindex required", stored)
+			}
+		}
+	}
+	library.EmbeddingProvider, library.EmbeddingModel, library.EmbeddingDimension = status.EmbeddingProvider, status.EmbeddingModel, status.EmbeddingDimension
+	if status.EmbeddingFingerprint != "" {
+		library.EmbeddingFingerprint = status.EmbeddingFingerprint
+	}
 	previous := map[string]ManagedDocument{}
 	for _, doc := range library.Documents {
 		previous[doc.Path] = doc
@@ -559,7 +830,21 @@ func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, err
 	next := []ManagedDocument{}
 	work := []pendingDocumentIndex{}
 	cancelled := false
+	productPrefs := loadProductPreferences()
 	for _, root := range library.Roots {
+		rootPolicy := productPrefs.DocumentPolicies[root.Path]
+		if rootPolicy.Mode == "" {
+			rootPolicy = DocumentRootPolicy{Mode: "semantic", MaxMB: 20, MaxPages: maxDocumentPDFPages, MaxSlides: maxDocumentPPTXSlides}
+		}
+		if rootPolicy.Mode == "excluded" {
+			for path, old := range previous {
+				if sameDocumentPath(old.Root, root.Path) {
+					found[path] = true
+					next = append(next, old)
+				}
+			}
+			continue
+		}
 		if ctx.Err() != nil {
 			cancelled = true
 			break
@@ -587,24 +872,33 @@ func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, err
 				}
 				return nil
 			}
+			for _, excluded := range library.ExcludedPaths {
+				if sameDocumentPath(excluded, path) {
+					return nil
+				}
+			}
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
 			if !supportedDocumentExtensions[ext] || found[path] {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return nil
+			}
+			if info.Size() == 0 {
 				return nil
 			}
 			a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) {
 				progress.Discovered++
 				progress.CurrentFile = path
 			})
-			info, err := entry.Info()
-			if err != nil {
-				return nil
-			}
 			rel, _ := filepath.Rel(root.Path, path)
 			doc := ManagedDocument{ID: documentID(path), Root: root.Path, Path: path, RelativePath: rel, Name: entry.Name(), FileType: strings.TrimPrefix(ext, "."), Size: info.Size(), ModifiedAt: float64(info.ModTime().UnixNano()) / 1e9, Tags: []string{}, IndexStatus: "pending"}
 			old, hadOld := previous[path]
 			if hadOld {
 				doc.Tags, doc.ContentHash, doc.IndexStatus, doc.IndexedAt, doc.Error, doc.ChunkCount = old.Tags, old.ContentHash, old.IndexStatus, old.IndexedAt, old.Error, old.ChunkCount
-				if old.Size == doc.Size && old.ModifiedAt == doc.ModifiedAt && old.IndexStatus == "indexed" {
+				unchanged := old.Size == doc.Size && old.ModifiedAt == doc.ModifiedAt
+				if unchanged && (old.IndexStatus == "indexed" || old.IndexStatus == "skipped" || (!retryFailed && old.IndexStatus == "failed" && !transientDocumentIndexError(old.Error))) {
 					found[path] = true
 					next = append(next, doc)
 					return nil
@@ -617,23 +911,42 @@ func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, err
 				next = append(next, doc)
 				return nil
 			}
-			if info.Size() > maxDocumentFileBytes {
-				doc.IndexStatus, doc.Error = "failed", "file exceeds the 50 MB indexing limit"
-				a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
+			maxBytes := int64(rootPolicy.MaxMB) << 20
+			if maxBytes <= 0 {
+				maxBytes = maxDocumentFileBytes
+			}
+			if info.Size() > maxBytes {
+				doc.IndexStatus, doc.Error = "skipped", fmt.Sprintf("file exceeds the %d MB automatic indexing limit", maxBytes>>20)
 				found[path] = true
 				next = append(next, doc)
 				return nil
 			}
-			chunks, hash, extractErr := extractDocument(path, ext)
+			chunks, hash, extractErr := extractDocumentWithLimits(path, ext, rootPolicy.MaxPages, rootPolicy.MaxSlides)
 			if extractErr != nil {
-				doc.IndexStatus, doc.Error = "failed", extractErr.Error()
-				a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
+				if documentIndexLimitError(extractErr) {
+					doc.IndexStatus, doc.Error = "skipped", extractErr.Error()
+				} else {
+					doc.IndexStatus, doc.Error = "failed", extractErr.Error()
+					a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
+				}
 				found[path] = true
 				next = append(next, doc)
+				return nil
+			}
+			if len(chunks) > maxDocumentIndexChunks {
+				doc.IndexStatus, doc.Error = "skipped", fmt.Sprintf("document creates %d chunks; automatic indexing is limited to %d", len(chunks), maxDocumentIndexChunks)
+				found[path] = true
+				next = append(next, doc)
+				return nil
+			}
+			if hadOld && old.IndexStatus == "indexed" && old.ContentHash != "" && old.ContentHash == hash {
+				doc.ContentHash, doc.IndexStatus, doc.IndexedAt, doc.Error, doc.ChunkCount = old.ContentHash, old.IndexStatus, old.IndexedAt, "", old.ChunkCount
+				next = append(next, doc)
+				found[path] = true
 				return nil
 			}
 			work = append(work, pendingDocumentIndex{doc: doc, chunks: chunks, hash: hash})
-			a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Pending++ })
+			a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Pending++; progress.TotalChunks += len(chunks) })
 			found[path] = true
 			return nil
 		})
@@ -643,39 +956,83 @@ func (a *App) refreshDocuments(ctx context.Context) (DocumentSnapshot, bool, err
 		}
 	}
 	if !cancelled && len(work) > 0 {
-		a.updateDocumentScanProgress(true, func(progress *DocumentScanProgress) {
-			progress.Phase, progress.CurrentFile = "embedding", ""
-		})
-		texts := []string{}
-		for _, item := range work {
-			for _, chunk := range item.chunks {
-				texts = append(texts, chunk.Text)
-			}
-		}
-		vectors, embedErr := embedWithLongbrain(ctx, texts)
-		offset := 0
-		for _, item := range work {
+		const targetBatchChunks = 64
+		for start := 0; start < len(work); {
 			if ctx.Err() != nil {
 				cancelled = true
 				break
 			}
-			count := len(item.chunks)
-			doc := item.doc
-			a.updateDocumentScanProgress(true, func(progress *DocumentScanProgress) {
-				progress.Phase, progress.CurrentFile = "indexing", doc.Path
-			})
-			if embedErr != nil {
-				doc.IndexStatus, doc.Error = "failed", embedErr.Error()
-				a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
-			} else if err := upsertDocument(ctx, doc, item.hash, item.chunks, vectors[offset:offset+count]); err != nil {
-				doc.IndexStatus, doc.Error = "failed", err.Error()
-				a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
-			} else {
-				doc.IndexStatus, doc.Error, doc.ContentHash, doc.IndexedAt, doc.ChunkCount = "indexed", "", item.hash, time.Now().UTC().Format(time.RFC3339), count
-				a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Indexed++ })
+			end, chunkCount := start, 0
+			for end < len(work) && (chunkCount == 0 || chunkCount+len(work[end].chunks) <= targetBatchChunks) {
+				chunkCount += len(work[end].chunks)
+				end++
 			}
-			next = append(next, doc)
-			offset += count
+			if end == start { // one unusually large document still makes progress
+				end++
+			}
+			currentPath := work[start].doc.Path
+			a.updateDocumentScanProgress(true, func(progress *DocumentScanProgress) {
+				progress.Phase, progress.CurrentFile = "embedding", currentPath
+			})
+			texts := make([]string, 0, chunkCount)
+			for _, item := range work[start:end] {
+				for _, chunk := range item.chunks {
+					texts = append(texts, chunk.Text)
+				}
+			}
+			embeddingResult, batchErr := embedDocumentChunks(ctx, texts, library.EmbeddingFingerprint)
+			batchVectors := embeddingResult.Vectors
+			if batchErr == nil && embeddingResult.Fingerprint != "" {
+				library.EmbeddingFingerprint = embeddingResult.Fingerprint
+			}
+			a.updateDocumentScanProgress(true, func(progress *DocumentScanProgress) {
+				progress.CacheHits += embeddingResult.CacheHits
+				progress.CacheMisses += embeddingResult.CacheMisses
+				progress.EmbeddingRequests += len(embeddingResult.Batches)
+				for _, batch := range embeddingResult.Batches {
+					progress.EmbeddingMS += batch.DurationMS
+				}
+				progress.EmbeddingBatches = append(progress.EmbeddingBatches, embeddingResult.Batches...)
+				progress.ElapsedMS = time.Since(a.documentScanStartedAt).Milliseconds()
+			})
+			batchUpserted := false
+			if batchErr == nil {
+				batchUpserted = upsertDocumentBatch(ctx, work[start:end], batchVectors, library.EmbeddingFingerprint) == nil
+			}
+			offset := 0
+			for _, item := range work[start:end] {
+				doc := item.doc
+				vectors, embedErr := [][]float64(nil), batchErr
+				if batchErr == nil {
+					vectors = batchVectors[offset : offset+len(item.chunks)]
+				}
+				a.updateDocumentScanProgress(true, func(progress *DocumentScanProgress) {
+					progress.Phase, progress.CurrentFile = "indexing", doc.Path
+				})
+				if embedErr != nil {
+					doc.IndexStatus, doc.Error = "failed", embedErr.Error()
+					a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
+				} else if !batchUpserted {
+					// A bulk write failure falls back to isolated writes so one
+					// malformed document does not fail the entire micro-batch.
+					if err := upsertDocument(ctx, doc, item.hash, item.chunks, vectors, library.EmbeddingFingerprint); err != nil {
+						doc.IndexStatus, doc.Error = "failed", err.Error()
+						a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Failed++ })
+					} else {
+						doc.IndexStatus, doc.Error, doc.ContentHash, doc.IndexedAt, doc.ChunkCount = "indexed", "", item.hash, time.Now().UTC().Format(time.RFC3339), len(item.chunks)
+						a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Indexed++ })
+					}
+				} else {
+					doc.IndexStatus, doc.Error, doc.ContentHash, doc.IndexedAt, doc.ChunkCount = "indexed", "", item.hash, time.Now().UTC().Format(time.RFC3339), len(item.chunks)
+					a.updateDocumentScanProgress(false, func(progress *DocumentScanProgress) { progress.Indexed++ })
+				}
+				next = append(next, doc)
+				offset += len(item.chunks)
+			}
+			if err := saveDocumentScanCheckpoint(library, next, work[end:]); err != nil {
+				return DocumentSnapshot{}, false, err
+			}
+			start = end
 		}
 	}
 	if cancelled || ctx.Err() != nil {
@@ -717,6 +1074,11 @@ func shouldSkipDocumentDirectory(name string) bool {
 	return strings.HasPrefix(name, ".") || ignoredDocumentDirectories[name]
 }
 
+func transientDocumentIndexError(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "timeout") || strings.Contains(message, "deadline exceeded") || strings.Contains(message, "connection reset") || strings.Contains(message, "connection refused")
+}
+
 func containsDocumentPath(docs []ManagedDocument, path string) bool {
 	for _, doc := range docs {
 		if doc.Path == path {
@@ -741,39 +1103,154 @@ func documentID(path string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-const embedWorkerScript = `import json,sys
-from app import providers
-request=json.load(sys.stdin)
-model=providers.build_embed_model()
-json.dump({"vectors":[model.get_text_embedding(text) for text in request["texts"]]},sys.stdout)`
-
-func embedWithLongbrainBatch(ctx context.Context, texts []string) ([][]float64, error) {
-	data, _ := json.Marshal(map[string]any{"texts": texts})
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", longbrainContainer, "python", "-c", embedWorkerScript)
-	cmd.Stdin = bytes.NewReader(data)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, context.Canceled
-		}
-		return nil, fmt.Errorf("LongBrain embedding failed: %s", strings.TrimSpace(stderr.String()))
-	}
-	var response struct {
-		Vectors [][]float64 `json:"vectors"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
-		return nil, fmt.Errorf("invalid LongBrain embedding response: %w", err)
-	}
-	if len(response.Vectors) != len(texts) {
-		return nil, fmt.Errorf("LongBrain returned %d embeddings for %d chunks", len(response.Vectors), len(texts))
-	}
-	return response.Vectors, nil
+func documentChunkCacheKey(fingerprint, text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return fingerprint + ":" + documentChunkerVersion + ":" + hex.EncodeToString(sum[:])
 }
 
-func embedWithLongbrain(ctx context.Context, texts []string) ([][]float64, error) {
-	const batchSize = 64
+func cachedDocumentVectors(ctx context.Context, keys []string) (map[string][]float64, error) {
+	result := map[string][]float64{}
+	if len(keys) == 0 {
+		return result, nil
+	}
+	should := make([]any, 0, len(keys))
+	for _, key := range keys {
+		should = append(should, map[string]any{"key": "embedding_cache_key", "match": map[string]any{"value": key}})
+	}
+	body, _ := json.Marshal(map[string]any{"limit": len(keys), "with_payload": true, "with_vector": true, "filter": map[string]any{"should": should}})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, qdrantURL+"/collections/"+documentCollection+"/points/scroll", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := documentHTTPClient(30 * time.Second).Do(req)
+	if err != nil {
+		return result, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return result, nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return result, fmt.Errorf("read document embedding cache failed: %s", responseDetail(raw))
+	}
+	var response struct {
+		Result struct {
+			Points []struct {
+				Vector  []float64      `json:"vector"`
+				Payload map[string]any `json:"payload"`
+			} `json:"points"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return result, err
+	}
+	for _, point := range response.Result.Points {
+		key, _ := point.Payload["embedding_cache_key"].(string)
+		if key != "" && len(point.Vector) > 0 {
+			result[key] = point.Vector
+		}
+	}
+	return result, nil
+}
+
+func embedDocumentChunks(ctx context.Context, texts []string, fingerprint string) (documentEmbeddingResult, error) {
+	keys := make([]string, len(texts))
+	uniqueKeys := []string{}
+	seen := map[string]bool{}
+	for index, value := range texts {
+		keys[index] = documentChunkCacheKey(fingerprint, value)
+		if !seen[keys[index]] {
+			seen[keys[index]] = true
+			uniqueKeys = append(uniqueKeys, keys[index])
+		}
+	}
+	cached, err := cachedDocumentVectors(ctx, uniqueKeys)
+	if err != nil {
+		return documentEmbeddingResult{}, err
+	}
+	missingKeys, missingTexts := []string{}, []string{}
+	for index, key := range keys {
+		if _, ok := cached[key]; !ok && !seen["missing:"+key] {
+			seen["missing:"+key] = true
+			missingKeys = append(missingKeys, key)
+			missingTexts = append(missingTexts, texts[index])
+		}
+	}
+	cacheHits := len(texts) - len(missingTexts)
+	batches := []DocumentEmbeddingBatchMetric{}
+	if len(missingTexts) > 0 {
+		result, err := embedWithLongbrainResult(ctx, missingTexts)
+		batches = result.Batches
+		if err != nil {
+			return documentEmbeddingResult{CacheHits: cacheHits, CacheMisses: len(missingTexts), Batches: result.Batches}, err
+		}
+		if fingerprint != "" && result.Fingerprint != fingerprint && len(cached) > 0 {
+			firstBatches := result.Batches
+			result, err = embedWithLongbrainResult(ctx, texts)
+			result.Batches = append(firstBatches, result.Batches...)
+			if err != nil {
+				return documentEmbeddingResult{CacheMisses: len(texts), Batches: result.Batches}, err
+			}
+			result.CacheMisses = len(texts)
+			return result, nil
+		}
+		fingerprint = result.Fingerprint
+		for index, key := range missingKeys {
+			cached[key] = result.Vectors[index]
+		}
+	}
+	vectors := make([][]float64, len(keys))
+	for index, key := range keys {
+		vectors[index] = cached[key]
+	}
+	return documentEmbeddingResult{Vectors: vectors, Fingerprint: fingerprint, CacheHits: cacheHits, CacheMisses: len(missingTexts), Batches: batches}, nil
+}
+
+func embedWithLongbrainBatch(ctx context.Context, texts []string) (result documentEmbeddingResult, err error) {
+	started := time.Now()
+	defer func() {
+		result.Batches = append(result.Batches, DocumentEmbeddingBatchMetric{Texts: len(texts), DurationMS: time.Since(started).Milliseconds()})
+	}()
+	data, _ := json.Marshal(map[string]any{"texts": texts, "profile": documentEmbeddingProfile, "local_only": true})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, longbrainURL+"/embeddings", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := documentHTTPClient(5 * time.Minute).Do(req)
+	if err != nil {
+		return documentEmbeddingResult{}, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return documentEmbeddingResult{}, fmt.Errorf("LongBrain embedding failed: %s", responseDetail(raw))
+	}
+	var response struct {
+		Vectors     [][]float64 `json:"vectors"`
+		Dimension   int         `json:"dimension"`
+		Fingerprint string      `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return documentEmbeddingResult{}, fmt.Errorf("invalid LongBrain embedding response: %w", err)
+	}
+	if len(response.Vectors) != len(texts) {
+		return documentEmbeddingResult{}, fmt.Errorf("LongBrain returned %d embeddings for %d chunks", len(response.Vectors), len(texts))
+	}
+	if response.Dimension <= 0 || response.Fingerprint == "" {
+		return documentEmbeddingResult{}, fmt.Errorf("LongBrain embedding response is missing its vector fingerprint")
+	}
+	for _, vector := range response.Vectors {
+		if len(vector) != response.Dimension {
+			return documentEmbeddingResult{}, fmt.Errorf("LongBrain returned vector dimension %d, expected %d", len(vector), response.Dimension)
+		}
+	}
+	return documentEmbeddingResult{Vectors: response.Vectors, Fingerprint: response.Fingerprint}, nil
+}
+
+func embedWithLongbrainResult(ctx context.Context, texts []string) (documentEmbeddingResult, error) {
+	// BGE-M3 on CPU can take longer than the HTTP timeout for 64 full-sized
+	// document chunks. Smaller requests also make transient retries cheaper.
+	const batchSize = 16
 	vectors := make([][]float64, 0, len(texts))
+	fingerprint := ""
+	batches := []DocumentEmbeddingBatchMetric{}
 	for start := 0; start < len(texts); start += batchSize {
 		end := start + batchSize
 		if end > len(texts) {
@@ -781,11 +1258,21 @@ func embedWithLongbrain(ctx context.Context, texts []string) ([][]float64, error
 		}
 		batch, err := embedWithLongbrainBatch(ctx, texts[start:end])
 		if err != nil {
-			return nil, err
+			return documentEmbeddingResult{Batches: append(batches, batch.Batches...)}, err
 		}
-		vectors = append(vectors, batch...)
+		if fingerprint != "" && batch.Fingerprint != fingerprint {
+			return documentEmbeddingResult{Batches: append(batches, batch.Batches...)}, fmt.Errorf("LongBrain embedding fingerprint changed during one request")
+		}
+		fingerprint = batch.Fingerprint
+		vectors = append(vectors, batch.Vectors...)
+		batches = append(batches, batch.Batches...)
 	}
-	return vectors, nil
+	return documentEmbeddingResult{Vectors: vectors, Fingerprint: fingerprint, Batches: batches}, nil
+}
+
+func embedWithLongbrain(ctx context.Context, texts []string) ([][]float64, error) {
+	result, err := embedWithLongbrainResult(ctx, texts)
+	return result.Vectors, err
 }
 
 func ensureDocumentCollection(ctx context.Context, dimension int) error {
@@ -831,21 +1318,60 @@ func ensureDocumentCollection(ctx context.Context, dimension int) error {
 	return nil
 }
 
-func deleteDocumentCollection(ctx context.Context) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, qdrantURL+"/collections/"+documentCollection, nil)
-	resp, err := documentHTTPClient(15 * time.Second).Do(req)
+func indexedDocumentChunkCount(library DocumentLibrary) int {
+	total := 0
+	for _, doc := range library.Documents {
+		if doc.IndexStatus == "indexed" && doc.ChunkCount > 0 {
+			total += doc.ChunkCount
+		}
+	}
+	return total
+}
+
+// documentCollectionPointCount is deliberately read-only. Collection
+// creation belongs to indexing, not searching: creating an empty collection
+// during a search hides a lost index behind a successful empty result.
+func documentCollectionPointCount(ctx context.Context) (int, error) {
+	return documentCollectionFilteredPointCount(ctx, []any{
+		map[string]any{"key": "project_id", "match": map[string]any{"value": documentProjectID}},
+	})
+}
+
+func documentCollectionDocumentPointCount(ctx context.Context, documentID string) (int, error) {
+	return documentCollectionFilteredPointCount(ctx, []any{
+		map[string]any{"key": "project_id", "match": map[string]any{"value": documentProjectID}},
+		map[string]any{"key": "document_id", "match": map[string]any{"value": documentID}},
+	})
+}
+
+func documentCollectionFilteredPointCount(ctx context.Context, must []any) (int, error) {
+	body, _ := json.Marshal(map[string]any{
+		"exact":  true,
+		"filter": map[string]any{"must": must},
+	})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, qdrantURL+"/collections/"+documentCollection+"/points/count", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := documentHTTPClient(10 * time.Second).Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil
+		return 0, nil
 	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return fmt.Errorf("Qdrant collection delete failed: %s", strings.TrimSpace(string(message)))
+		return 0, fmt.Errorf("Qdrant count failed: %s", strings.TrimSpace(string(raw)))
 	}
-	return nil
+	var result struct {
+		Result struct {
+			Count int `json:"count"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return 0, err
+	}
+	return result.Result.Count, nil
 }
 
 func qdrantPointID(documentID, version string, chunk int) string {
@@ -857,7 +1383,100 @@ func qdrantPointID(documentID, version string, chunk int) string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", h[:8], h[8:12], h[12:16], h[16:20], h[20:])
 }
 
-func upsertDocument(ctx context.Context, doc ManagedDocument, version string, chunks []DocumentChunk, vectors [][]float64) error {
+func saveDocumentScanCheckpoint(library DocumentLibrary, completed []ManagedDocument, remaining []pendingDocumentIndex) error {
+	checkpoint := library
+	checkpoint.Documents = append([]ManagedDocument{}, completed...)
+	for _, item := range remaining {
+		checkpoint.Documents = append(checkpoint.Documents, item.doc)
+	}
+	sortDocuments(checkpoint.Documents)
+	documentLibraryMu.Lock()
+	defer documentLibraryMu.Unlock()
+	return saveDocumentLibrary(checkpoint)
+}
+
+func documentQdrantPoint(doc ManagedDocument, version, fingerprint string, chunk DocumentChunk, vector []float64) map[string]any {
+	payload := map[string]any{"document_id": doc.ID, "version": version, "path": doc.Path, "file_name": doc.Name, "file_type": doc.FileType, "chunk_index": chunk.ChunkIndex, "text": chunk.Text, "project_id": documentProjectID, "embedding_cache_key": documentChunkCacheKey(fingerprint, chunk.Text), "embedding_fingerprint": fingerprint, "chunker_version": documentChunkerVersion}
+	if chunk.Page != nil {
+		payload["page"] = *chunk.Page
+	}
+	if chunk.Slide != nil {
+		payload["slide"] = *chunk.Slide
+	}
+	if chunk.LineStart != nil {
+		payload["line_start"] = *chunk.LineStart
+	}
+	if chunk.LineEnd != nil {
+		payload["line_end"] = *chunk.LineEnd
+	}
+	if chunk.ParagraphStart != nil {
+		payload["paragraph_start"] = *chunk.ParagraphStart
+	}
+	if chunk.ParagraphEnd != nil {
+		payload["paragraph_end"] = *chunk.ParagraphEnd
+	}
+	if chunk.Heading != "" {
+		payload["heading"] = chunk.Heading
+	}
+	return map[string]any{"id": qdrantPointID(doc.ID, version, chunk.ChunkIndex), "vector": vector, "payload": payload}
+}
+
+func upsertQdrantPoints(ctx context.Context, points []map[string]any) error {
+	for start := 0; start < len(points); start += 64 {
+		end := start + 64
+		if end > len(points) {
+			end = len(points)
+		}
+		body, _ := json.Marshal(map[string]any{"points": points[start:end]})
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, qdrantURL+"/collections/"+documentCollection+"/points?wait=true", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := documentHTTPClient(60 * time.Second).Do(req)
+		if err != nil {
+			return err
+		}
+		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("Qdrant upsert failed: %s", strings.TrimSpace(string(responseBody)))
+		}
+	}
+	return nil
+}
+
+func upsertDocumentBatch(ctx context.Context, items []pendingDocumentIndex, vectors [][]float64, fingerprint string) error {
+	if len(vectors) == 0 {
+		return fmt.Errorf("document batch has no embeddings")
+	}
+	if err := ensureDocumentCollection(ctx, len(vectors[0])); err != nil {
+		return err
+	}
+	points := make([]map[string]any, 0, len(vectors))
+	offset := 0
+	for _, item := range items {
+		if offset+len(item.chunks) > len(vectors) {
+			return fmt.Errorf("document batch returned too few embeddings")
+		}
+		for index, chunk := range item.chunks {
+			points = append(points, documentQdrantPoint(item.doc, item.hash, fingerprint, chunk, vectors[offset+index]))
+		}
+		offset += len(item.chunks)
+	}
+	if offset != len(vectors) {
+		return fmt.Errorf("document batch returned %d unused embeddings", len(vectors)-offset)
+	}
+	if err := upsertQdrantPoints(ctx, points); err != nil {
+		return err
+	}
+	for _, item := range items {
+		filter := map[string]any{"must": []any{map[string]any{"key": "document_id", "match": map[string]any{"value": item.doc.ID}}}, "must_not": []any{map[string]any{"key": "version", "match": map[string]any{"value": item.hash}}}}
+		if err := deleteQdrantFilter(ctx, filter); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertDocument(ctx context.Context, doc ManagedDocument, version string, chunks []DocumentChunk, vectors [][]float64, fingerprint string) error {
 	if len(vectors) == 0 {
 		return fmt.Errorf("document has no embeddings")
 	}
@@ -871,39 +1490,10 @@ func upsertDocument(ctx context.Context, doc ManagedDocument, version string, ch
 		}
 		points := []map[string]any{}
 		for i := start; i < end; i++ {
-			chunk := chunks[i]
-			payload := map[string]any{"document_id": doc.ID, "version": version, "path": doc.Path, "file_name": doc.Name, "file_type": doc.FileType, "chunk_index": chunk.ChunkIndex, "text": chunk.Text, "project_id": documentProjectID}
-			if chunk.Page != nil {
-				payload["page"] = *chunk.Page
-			}
-			if chunk.LineStart != nil {
-				payload["line_start"] = *chunk.LineStart
-			}
-			if chunk.LineEnd != nil {
-				payload["line_end"] = *chunk.LineEnd
-			}
-			if chunk.ParagraphStart != nil {
-				payload["paragraph_start"] = *chunk.ParagraphStart
-			}
-			if chunk.ParagraphEnd != nil {
-				payload["paragraph_end"] = *chunk.ParagraphEnd
-			}
-			if chunk.Heading != "" {
-				payload["heading"] = chunk.Heading
-			}
-			points = append(points, map[string]any{"id": qdrantPointID(doc.ID, version, chunk.ChunkIndex), "vector": vectors[i], "payload": payload})
+			points = append(points, documentQdrantPoint(doc, version, fingerprint, chunks[i], vectors[i]))
 		}
-		body, _ := json.Marshal(map[string]any{"points": points})
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, qdrantURL+"/collections/"+documentCollection+"/points?wait=true", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := documentHTTPClient(60 * time.Second).Do(req)
-		if err != nil {
+		if err := upsertQdrantPoints(ctx, points); err != nil {
 			return err
-		}
-		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("Qdrant upsert failed: %s", strings.TrimSpace(string(responseBody)))
 		}
 	}
 	filter := map[string]any{"must": []any{map[string]any{"key": "document_id", "match": map[string]any{"value": doc.ID}}}, "must_not": []any{map[string]any{"key": "version", "match": map[string]any{"value": version}}}}
@@ -933,7 +1523,30 @@ func deleteQdrantFilter(ctx context.Context, filter map[string]any) error {
 	return nil
 }
 
+// SearchDocuments is the exact-match mode. It never goes through vector
+// search: the embedding of a shortened or reworded lexical query (file names,
+// Japanese titles, IDs) can drop the target chunk out of any semantic
+// candidate set, so exact mode scans every indexed chunk and matches text
+// directly.
 func (a *App) SearchDocuments(query string) ([]DocumentSearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []DocumentSearchHit{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	status := detectLongbrain(ctx)
+	if !longbrainDocumentsAvailable(status) {
+		return nil, fmt.Errorf("LongBrain is required. Install or start LongBrain and Qdrant first: %s", documentInstallURL)
+	}
+	return documentExactScanHits(ctx, query)
+}
+
+func (a *App) SemanticSearchDocuments(query string) ([]DocumentSearchHit, error) {
+	return a.searchDocuments(query)
+}
+
+func (a *App) searchDocuments(query string) ([]DocumentSearchHit, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return []DocumentSearchHit{}, nil
@@ -954,10 +1567,18 @@ func (a *App) SearchDocuments(query string) ([]DocumentSearchHit, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureDocumentCollection(ctx, len(vectors[0])); err != nil {
+	indexedPoints, err := documentCollectionPointCount(ctx)
+	if err != nil {
 		return nil, err
 	}
-	body, _ := json.Marshal(map[string]any{"vector": vectors[0], "limit": 30, "with_payload": true, "score_threshold": 0.2})
+	if indexedPoints == 0 {
+		return nil, fmt.Errorf("document index is empty; scan documents again before searching")
+	}
+	// Retrieve a wider semantic candidate set, then rerank it locally with
+	// literal matches. Embedding cosine similarity alone is not a calibrated
+	// accuracy percentage and can rank an unrelated passage in another
+	// language above a passage that actually contains the requested words.
+	body, _ := json.Marshal(map[string]any{"vector": vectors[0], "limit": 100, "with_payload": true, "score_threshold": 0.1})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, qdrantURL+"/collections/"+documentCollection+"/points/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := documentHTTPClient(30 * time.Second).Do(req)
@@ -980,14 +1601,430 @@ func (a *App) SearchDocuments(query string) ([]DocumentSearchHit, error) {
 	}
 	hits := make([]DocumentSearchHit, 0, len(result.Result))
 	for _, item := range result.Result {
-		hits = append(hits, searchHitFromPayload(item.Payload, item.Score))
+		hit := searchHitFromPayload(item.Payload, item.Score)
+		hit.Score = documentSearchRelevance(query, hit, item.Score)
+		hits = append(hits, hit)
+	}
+	if exactHits, err := documentExactAnchorHits(ctx, query); err == nil {
+		hits = mergeDocumentSearchHits(hits, exactHits)
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	return diversifyDocumentSearchHits(existingDocumentSearchHits(hits), 30, 3), nil
+}
+
+func documentSearchRelevance(query string, hit DocumentSearchHit, cosine float64) float64 {
+	semantic := clampDocumentScore((cosine - 0.1) / 0.9)
+	lexical := documentLexicalScore(query, hit.Text, hit.Heading, hit.FileName)
+	if lexical <= 0 {
+		// Semantic-only matches remain useful, but do not present raw cosine as
+		// an "accuracy" percentage or let it outrank a direct text match.
+		return minFloat(0.74, semantic*0.74)
+	}
+	if lexical == 1 {
+		return 0.9 + 0.1*semantic
+	}
+	return clampDocumentScore(0.72*lexical + 0.28*semantic)
+}
+
+func documentExactTextMatch(query, text string) bool {
+	haystack := normalizedSearchText(text)
+	needle := normalizedSearchText(query)
+	if needle != "" && strings.Contains(haystack, needle) {
+		return true
+	}
+	anchors := documentSearchAnchors(query)
+	if len(anchors) == 0 {
+		return false
+	}
+	// A query such as `7月リリース_AIインポート` contains multiple CJK
+	// runs. Matching only one common run must not turn an absent filename into
+	// a 100% exact result; every extracted anchor must be present.
+	for _, anchor := range anchors {
+		if !strings.Contains(haystack, anchor) && documentCJKAnchorCoverage(anchor, haystack) < 0.6 {
+			return false
+		}
+	}
+	return true
+}
+
+// documentCJKAnchorCoverage measures how much of a CJK anchor survives in the
+// haystack via character-bigram overlap. Japanese/Chinese text has no word
+// separators, so dropping a word from a query can join the remaining runs into
+// a phrase that no longer exists verbatim anywhere.
+func documentCJKAnchorCoverage(anchor, haystack string) float64 {
+	runes := []rune(anchor)
+	if len(runes) < 4 {
+		return 0
+	}
+	for _, r := range runes {
+		if !isDocumentCJKRune(r) {
+			return 0
+		}
+	}
+	matched := 0
+	for i := 0; i+1 < len(runes); i++ {
+		if strings.Contains(haystack, string(runes[i:i+2])) {
+			matched++
+		}
+	}
+	return float64(matched) / float64(len(runes)-1)
+}
+
+func documentLexicalScore(query string, values ...string) float64 {
+	needle := normalizedSearchText(query)
+	if needle == "" {
+		return 0
+	}
+	haystack := normalizedSearchText(strings.Join(values, " "))
+	if strings.Contains(haystack, needle) {
+		return 1
+	}
+	if anchors := documentSearchAnchors(query); len(anchors) > 0 {
+		if len(anchors) == 1 && anchors[0] == needle {
+			goto termScoring
+		}
+		lowestCoverage := 1.0
+		for _, anchor := range anchors {
+			if strings.Contains(haystack, anchor) {
+				continue
+			}
+			coverage := documentCJKAnchorCoverage(anchor, haystack)
+			if coverage < 0.6 {
+				return 0
+			}
+			if coverage < lowestCoverage {
+				lowestCoverage = coverage
+			}
+		}
+		if anchors[0] != needle {
+			return 0.95 * lowestCoverage
+		}
+	}
+
+termScoring:
+	terms := strings.Fields(needle)
+	if len(terms) == 0 {
+		return 0
+	}
+	matched := 0
+	for _, term := range terms {
+		if utf8.RuneCountInString(term) >= 2 && strings.Contains(haystack, term) {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return 0
+	}
+	ratio := float64(matched) / float64(len(terms))
+	if matched == len(terms) {
+		return 0.9
+	}
+	return 0.65 * ratio
+}
+
+func documentSearchAnchors(query string) []string {
+	anchors := []string{}
+	seen := map[string]bool{}
+	add := func(value string) {
+		normalized := normalizedSearchText(value)
+		if normalized == "" || seen[normalized] {
+			return
+		}
+		if utf8.RuneCountInString(normalized) >= 2 {
+			anchors = append(anchors, normalized)
+			seen[normalized] = true
+		}
+	}
+	for _, quote := range [][2]rune{{'"', '"'}, {'“', '”'}, {'「', '」'}, {'『', '』'}} {
+		inQuote := false
+		var quoted strings.Builder
+		for _, r := range query {
+			if !inQuote && r == quote[0] {
+				inQuote = true
+				quoted.Reset()
+				continue
+			}
+			if inQuote && r == quote[1] {
+				add(quoted.String())
+				inQuote = false
+				continue
+			}
+			if inQuote {
+				quoted.WriteRune(r)
+			}
+		}
+	}
+	var cjkRun strings.Builder
+	flushCJK := func() {
+		if utf8.RuneCountInString(cjkRun.String()) >= 2 {
+			add(cjkRun.String())
+		}
+		cjkRun.Reset()
+	}
+	for _, r := range query {
+		if isDocumentCJKRune(r) {
+			cjkRun.WriteRune(r)
+		} else {
+			flushCJK()
+		}
+	}
+	flushCJK()
+	if len(anchors) == 0 {
+		add(query)
+	}
+	return anchors
+}
+
+func isDocumentCJKRune(r rune) bool {
+	return (r >= 0x3040 && r <= 0x30ff) || (r >= 0x3400 && r <= 0x4dbf) || (r >= 0x4e00 && r <= 0x9fff) || (r >= 0xf900 && r <= 0xfaff)
+}
+
+func documentExactAnchorHits(ctx context.Context, query string) ([]DocumentSearchHit, error) {
+	anchors := documentSearchAnchors(query)
+	if len(anchors) == 0 || !documentShouldScrollExactAnchors(query, anchors) {
+		return nil, nil
+	}
+	hits := []DocumentSearchHit{}
+	err := documentScanCollection(ctx, func(hit DocumentSearchHit) {
+		if documentExactTextMatch(query, hit.Text+" "+hit.Heading+" "+hit.FileName) {
+			hit.Score = documentSearchRelevance(query, hit, 1)
+			hits = append(hits, hit)
+		}
+	})
+	if err != nil {
+		return nil, err
 	}
 	return hits, nil
+}
+
+func documentExactScanHits(ctx context.Context, query string) ([]DocumentSearchHit, error) {
+	hits := []DocumentSearchHit{}
+	err := documentScanCollection(ctx, func(hit DocumentSearchHit) {
+		if score := documentLexicalScore(query, hit.Text, hit.Heading, hit.FileName); score > 0 {
+			hit.Score = score
+			hits = append(hits, hit)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	hits = existingDocumentSearchHits(hits)
+	if len(hits) > 30 {
+		hits = hits[:30]
+	}
+	return hits, nil
+}
+
+func documentScanCollection(ctx context.Context, visit func(DocumentSearchHit)) error {
+	var offset json.RawMessage
+	for page := 0; page < 200; page++ {
+		bodyMap := map[string]any{
+			"limit":        256,
+			"with_payload": true,
+			"with_vector":  false,
+			"filter": map[string]any{"must": []any{
+				map[string]any{"key": "project_id", "match": map[string]any{"value": documentProjectID}},
+			}},
+		}
+		if len(offset) > 0 && string(offset) != "null" {
+			var offsetValue any
+			if err := json.Unmarshal(offset, &offsetValue); err == nil {
+				bodyMap["offset"] = offsetValue
+			}
+		}
+		body, _ := json.Marshal(bodyMap)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, qdrantURL+"/collections/"+documentCollection+"/points/scroll", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := documentHTTPClient(30 * time.Second).Do(req)
+		if err != nil {
+			return err
+		}
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("document scan failed: %s", strings.TrimSpace(string(raw)))
+		}
+		var result struct {
+			Result struct {
+				Points []struct {
+					Payload map[string]any `json:"payload"`
+				} `json:"points"`
+				NextPageOffset json.RawMessage `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return err
+		}
+		for _, point := range result.Result.Points {
+			visit(searchHitFromPayload(point.Payload, 1))
+		}
+		offset = result.Result.NextPageOffset
+		if len(offset) == 0 || string(offset) == "null" {
+			break
+		}
+	}
+	return nil
+}
+
+func documentShouldScrollExactAnchors(query string, anchors []string) bool {
+	needle := normalizedSearchText(query)
+	// Short API verbs and identifiers (GET, POST, S3, JWT...) are poorly
+	// represented by semantic embeddings. Always merge literal scan hits for
+	// them, even when the user currently has Meaning mode selected.
+	if utf8.RuneCountInString(needle) <= 4 {
+		return true
+	}
+	for _, r := range query {
+		if isDocumentCJKRune(r) {
+			return true
+		}
+	}
+	for _, anchor := range anchors {
+		if anchor != needle {
+			return true
+		}
+	}
+	return false
+}
+
+// DocumentPlainText returns the already-supported local extraction of a
+// managed document for explicit user copy actions. It does not query Qdrant,
+// run embeddings, or send document content to LongBrain.
+func (a *App) DocumentPlainText(path string) (string, error) {
+	if !managedDocumentPath(path) {
+		return "", fmt.Errorf("document is not in the managed library")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	chunks, _, err := extractDocument(path, ext)
+	if err != nil {
+		return "", err
+	}
+	var result strings.Builder
+	const maxCopyBytes = 2 << 20
+	for _, chunk := range chunks {
+		label := ""
+		if chunk.Slide != nil {
+			label = fmt.Sprintf("[Slide %d]\n", *chunk.Slide)
+		} else if chunk.Page != nil {
+			label = fmt.Sprintf("[Page %d]\n", *chunk.Page)
+		}
+		addition := label + strings.TrimSpace(chunk.Text) + "\n\n"
+		if result.Len()+len(addition) > maxCopyBytes {
+			return "", fmt.Errorf("extracted document text exceeds the 2 MB copy limit")
+		}
+		result.WriteString(addition)
+	}
+	return strings.TrimSpace(result.String()), nil
+}
+
+func mergeDocumentSearchHits(left, right []DocumentSearchHit) []DocumentSearchHit {
+	merged := append([]DocumentSearchHit{}, left...)
+	indexes := map[string]int{}
+	for index, hit := range merged {
+		indexes[documentSearchHitKey(hit)] = index
+	}
+	for _, hit := range right {
+		key := documentSearchHitKey(hit)
+		if existing, ok := indexes[key]; ok {
+			if hit.Score > merged[existing].Score {
+				merged[existing] = hit
+			}
+			continue
+		}
+		indexes[key] = len(merged)
+		merged = append(merged, hit)
+	}
+	return merged
+}
+
+func documentSearchHitKey(hit DocumentSearchHit) string {
+	return hit.DocumentID + "\x00" + fmt.Sprint(hit.ChunkIndex)
+}
+
+func existingDocumentSearchHits(hits []DocumentSearchHit) []DocumentSearchHit {
+	result := make([]DocumentSearchHit, 0, len(hits))
+	for _, hit := range hits {
+		if strings.TrimSpace(hit.Path) == "" {
+			continue
+		}
+		if info, err := os.Stat(hit.Path); err == nil && !info.IsDir() {
+			result = append(result, hit)
+		}
+	}
+	return result
+}
+
+// diversifyDocumentSearchHits prevents a long document with many similar
+// chunks from occupying the whole result page. Ranking remains score-first;
+// only the number of passages contributed by one document is capped.
+func diversifyDocumentSearchHits(hits []DocumentSearchHit, limit, perDocument int) []DocumentSearchHit {
+	if limit <= 0 || perDocument <= 0 {
+		return []DocumentSearchHit{}
+	}
+	result := make([]DocumentSearchHit, 0, minInt(limit, len(hits)))
+	counts := map[string]int{}
+	for _, hit := range hits {
+		documentKey := hit.DocumentID
+		if documentKey == "" {
+			documentKey = norm.NFC.String(hit.Path)
+		}
+		if documentKey == "" {
+			documentKey = norm.NFC.String(hit.FileName)
+		}
+		if counts[documentKey] >= perDocument {
+			continue
+		}
+		counts[documentKey]++
+		result = append(result, hit)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
+}
+
+func normalizedSearchText(value string) string {
+	var result strings.Builder
+	space := true
+	// macOS frequently exposes Japanese and accented filenames in decomposed
+	// form. NFC makes visually identical query/file strings compare equally.
+	for _, r := range strings.ToLower(norm.NFC.String(value)) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			result.WriteRune(r)
+			space = false
+		} else if !space {
+			result.WriteByte(' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(result.String())
+}
+
+func clampDocumentScore(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func minFloat(left, right float64) float64 {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func searchHitFromPayload(p map[string]any, score float64) DocumentSearchHit {
 	hit := DocumentSearchHit{DocumentID: stringValue(p["document_id"]), Path: stringValue(p["path"]), FileName: stringValue(p["file_name"]), FileType: stringValue(p["file_type"]), ChunkIndex: intValue(p["chunk_index"]), Heading: stringValue(p["heading"]), Text: stringValue(p["text"]), Score: score}
 	hit.Page = optionalInt(p["page"])
+	hit.Slide = optionalInt(p["slide"])
 	hit.LineStart = optionalInt(p["line_start"])
 	hit.LineEnd = optionalInt(p["line_end"])
 	hit.ParagraphStart = optionalInt(p["paragraph_start"])
@@ -1010,6 +2047,10 @@ func optionalInt(v any) *int {
 }
 
 func (a *App) AskDocuments(question string) (DocumentAnswer, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return DocumentAnswer{}, fmt.Errorf("question is required")
+	}
 	status, err := requireLongbrainDocuments()
 	if err != nil {
 		return DocumentAnswer{}, err
@@ -1017,49 +2058,158 @@ func (a *App) AskDocuments(question string) (DocumentAnswer, error) {
 	if !status.LLMAvailable {
 		return DocumentAnswer{}, fmt.Errorf("Ask AI is unavailable because LongBrain has no LLM configured")
 	}
-	if !status.LLMLocal {
-		return DocumentAnswer{}, fmt.Errorf("Ask AI is blocked because LLM provider %q is not on the local-provider allowlist; document passages will not be sent", status.LLMProvider)
+	queries := a.documentAIQueries(question)
+	hits := []DocumentSearchHit{}
+	for _, query := range queries {
+		found, searchErr := a.searchDocuments(query)
+		if searchErr != nil {
+			err = searchErr
+			continue
+		}
+		hits = mergeDocumentSearchHits(hits, found)
 	}
-	hits, err := a.SearchDocuments(question)
-	if err != nil {
+	if len(hits) == 0 && err != nil {
 		return DocumentAnswer{}, err
 	}
 	if len(hits) == 0 {
 		return DocumentAnswer{Answer: "No relevant indexed documents were found.", Citations: []DocumentSearchHit{}}, nil
 	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 	if len(hits) > 6 {
 		hits = hits[:6]
 	}
+	return a.answerDocumentPassages(question, hits)
+}
+
+func (a *App) documentAIQueries(question string) []string {
+	queries := []string{}
+	seen := map[string]bool{}
+	add := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "`\"'“”[]")
+		value = strings.TrimPrefix(value, "- ")
+		value = strings.TrimPrefix(value, "* ")
+		if value == "" || seen[value] {
+			return
+		}
+		queries = append(queries, value)
+		seen[value] = true
+	}
+	add(question)
+	for _, anchor := range documentSearchAnchors(question) {
+		if anchor != normalizedSearchText(question) {
+			add(anchor)
+		}
+	}
+	prompt := "You are preparing document search queries. From the user's question, produce up to 5 short search queries that should retrieve the exact source passages. Include literal terms, translated equivalents, and important quoted or Japanese/CJK phrases. Return only a JSON array of strings.\n\nQuestion: " + question
+	response, err := a.askLongbrain(prompt, 45*time.Second)
+	if err == nil {
+		for _, query := range parseDocumentQueryList(response) {
+			add(query)
+		}
+	}
+	if len(queries) > 8 {
+		queries = queries[:8]
+	}
+	return queries
+}
+
+func (a *App) AskDocumentPassages(question string, passages []DocumentSearchHit) (DocumentAnswer, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return DocumentAnswer{}, fmt.Errorf("question is required")
+	}
+	status, err := requireLongbrainDocuments()
+	if err != nil {
+		return DocumentAnswer{}, err
+	}
+	if !status.LLMAvailable {
+		return DocumentAnswer{}, fmt.Errorf("Ask AI is unavailable because LongBrain has no LLM configured")
+	}
+	hits := make([]DocumentSearchHit, 0, len(passages))
+	for _, hit := range passages {
+		if strings.TrimSpace(hit.Text) != "" {
+			hits = append(hits, hit)
+		}
+	}
+	if len(hits) == 0 {
+		return DocumentAnswer{Answer: "No passages were selected for Ask AI.", Citations: []DocumentSearchHit{}}, nil
+	}
+	if len(hits) > 6 {
+		hits = hits[:6]
+	}
+	return a.answerDocumentPassages(question, hits)
+}
+
+func parseDocumentQueryList(response string) []string {
+	response = strings.TrimSpace(response)
+	var values []string
+	if err := json.Unmarshal([]byte(response), &values); err != nil {
+		start, end := strings.Index(response, "["), strings.LastIndex(response, "]")
+		if start >= 0 && end > start {
+			_ = json.Unmarshal([]byte(response[start:end+1]), &values)
+		}
+	}
+	if len(values) > 0 {
+		return values
+	}
+	lines := strings.Split(response, "\n")
+	values = make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimLeft(line, "-*0123456789.）) ")
+		line = strings.Trim(line, "`\"'“”")
+		if line != "" {
+			values = append(values, line)
+		}
+	}
+	return values
+}
+
+func (a *App) answerDocumentPassages(question string, hits []DocumentSearchHit) (DocumentAnswer, error) {
 	var contextText strings.Builder
 	for i, hit := range hits {
 		fmt.Fprintf(&contextText, "[%d] %s (%s)\n%s\n\n", i+1, hit.FileName, documentLocator(hit), hit.Text)
 	}
 	prompt := "Answer the question using only the passages below. Cite supporting passages as [1], [2], etc. If the passages are insufficient, say so.\n\nQuestion: " + question + "\n\nPassages:\n" + contextText.String()
-	status, err = requireLongbrainDocuments()
-	if err != nil || !status.LLMLocal {
-		return DocumentAnswer{}, fmt.Errorf("Ask AI stopped because the configured LLM is no longer on the local-provider allowlist")
+	status, err := requireLongbrainDocuments()
+	if err != nil || !status.LLMAvailable {
+		return DocumentAnswer{}, fmt.Errorf("Ask AI stopped because the configured LLM is no longer available")
 	}
-	payload, _ := json.Marshal(map[string]any{"session_id": fmt.Sprintf("thaloca-documents-%d", time.Now().UnixNano()), "message": prompt})
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, longbrainURL+"/chat", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := documentHTTPClient(180 * time.Second).Do(req)
+	answer, err := a.askLongbrain(prompt, 180*time.Second)
 	if err != nil {
 		return DocumentAnswer{}, err
+	}
+	return DocumentAnswer{Answer: answer, Citations: hits}, nil
+}
+
+func (a *App) askLongbrain(prompt string, timeout time.Duration) (string, error) {
+	// Keep the public /completion request provider-neutral. Some LongBrain
+	// adapters (notably Gemini) cannot accept generation options as direct
+	// generate_content arguments, so let LongBrain apply its own defaults.
+	payload, _ := json.Marshal(map[string]any{"prompt": prompt, "local_only": false})
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, longbrainURL+"/completion", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := documentHTTPClient(timeout).Do(req)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return DocumentAnswer{}, fmt.Errorf("LongBrain AI is unavailable: %s", responseDetail(raw))
+		return "", fmt.Errorf("LongBrain AI is unavailable: %s", responseDetail(raw))
 	}
 	var result struct {
-		Response string `json:"response"`
+		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return DocumentAnswer{}, err
+		return "", err
 	}
-	return DocumentAnswer{Answer: result.Response, Citations: hits}, nil
+	if strings.TrimSpace(result.Text) == "" {
+		return "", fmt.Errorf("LongBrain AI returned an empty completion")
+	}
+	return result.Text, nil
 }
 
 func documentLocator(hit DocumentSearchHit) string {
@@ -1114,6 +2264,31 @@ func managedDocumentPath(path string) bool {
 }
 
 func extractDocument(path, ext string) ([]DocumentChunk, string, error) {
+	return extractDocumentWithLimits(path, ext, maxDocumentPDFPages, maxDocumentPPTXSlides)
+}
+
+func extractDocumentWithLimits(path, ext string, maxPages, maxSlides int) ([]DocumentChunk, string, error) {
+	// PDFKit reads PDFs directly from disk. Hash them as a stream instead of
+	// loading another full copy into RAM first; the 50 MB file limit remains
+	// the outer safety bound enforced by the scanner.
+	if ext == ".pdf" {
+		hash, err := hashDocumentFile(path)
+		if err != nil {
+			return nil, "", err
+		}
+		if maxPages <= 0 {
+			maxPages = maxDocumentPDFPages
+		}
+		pages, err := extractPDFPages(path, maxPages)
+		if err != nil {
+			return nil, "", err
+		}
+		chunks := chunkPages(pages)
+		if len(chunks) == 0 {
+			return nil, "", fmt.Errorf("PDF contains no extractable text; OCR is not enabled")
+		}
+		return chunks, hash, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", err
@@ -1126,12 +2301,8 @@ func extractDocument(path, ext string) ([]DocumentChunk, string, error) {
 		chunks = chunkLines(string(data))
 	case ".docx":
 		chunks, err = extractDOCX(data)
-	case ".pdf":
-		var pages []string
-		pages, err = extractPDFPages(path)
-		if err == nil {
-			chunks = chunkPages(pages)
-		}
+	case ".pptx":
+		chunks, err = extractPPTXWithLimit(data, maxSlides)
 	default:
 		err = fmt.Errorf("unsupported document type: %s", ext)
 	}
@@ -1142,6 +2313,27 @@ func extractDocument(path, ext string) ([]DocumentChunk, string, error) {
 		return nil, "", fmt.Errorf("document contains no extractable text")
 	}
 	return chunks, hash, nil
+}
+
+func documentIndexLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "indexing limit") || strings.Contains(message, "automatic indexing limit")
+}
+
+func hashDocumentFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func chunkLines(text string) []DocumentChunk {
@@ -1187,6 +2379,9 @@ func extractDOCX(data []byte) ([]DocumentChunk, error) {
 	var document io.ReadCloser
 	for _, file := range reader.File {
 		if file.Name == "word/document.xml" {
+			if file.UncompressedSize64 > maxDocumentExpandedXMLBytes {
+				return nil, fmt.Errorf("DOCX document XML exceeds the automatic indexing limit")
+			}
 			document, err = file.Open()
 			break
 		}
@@ -1248,6 +2443,109 @@ func extractDOCX(data []byte) ([]DocumentChunk, error) {
 		start = end
 	}
 	return chunks, nil
+}
+
+func extractPPTX(data []byte) ([]DocumentChunk, error) {
+	return extractPPTXWithLimit(data, maxDocumentPPTXSlides)
+}
+
+func extractPPTXWithLimit(data []byte, maxSlides int) ([]DocumentChunk, error) {
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid PPTX: %w", err)
+	}
+	type slideFile struct {
+		number int
+		file   *zip.File
+	}
+	slides := []slideFile{}
+	var expandedSlideBytes uint64
+	for _, file := range reader.File {
+		name := file.Name
+		if !strings.HasPrefix(name, "ppt/slides/slide") || !strings.HasSuffix(name, ".xml") || strings.Contains(name, "_rels/") {
+			continue
+		}
+		numberText := strings.TrimSuffix(strings.TrimPrefix(name, "ppt/slides/slide"), ".xml")
+		number, numberErr := strconv.Atoi(numberText)
+		if numberErr == nil && number > 0 {
+			expandedSlideBytes += file.UncompressedSize64
+			if expandedSlideBytes > maxDocumentExpandedXMLBytes {
+				return nil, fmt.Errorf("PPTX slide XML exceeds the automatic indexing limit")
+			}
+			slides = append(slides, slideFile{number: number, file: file})
+		}
+	}
+	if len(slides) == 0 {
+		return nil, fmt.Errorf("PPTX contains no slides")
+	}
+	sort.Slice(slides, func(i, j int) bool { return slides[i].number < slides[j].number })
+	if maxSlides <= 0 {
+		maxSlides = maxDocumentPPTXSlides
+	}
+	if len(slides) > maxSlides {
+		return nil, fmt.Errorf("PPTX exceeds the %d slide automatic indexing limit", maxSlides)
+	}
+	chunks := []DocumentChunk{}
+	for _, slide := range slides {
+		text, textErr := extractPPTXSlideText(slide.file)
+		if textErr != nil {
+			return nil, fmt.Errorf("read PPTX slide %d: %w", slide.number, textErr)
+		}
+		for _, part := range splitText(text, maxDocumentChunk) {
+			value := strings.TrimSpace(part)
+			if value == "" {
+				continue
+			}
+			number := slide.number
+			chunks = append(chunks, DocumentChunk{Text: value, ChunkIndex: len(chunks), Slide: &number})
+		}
+	}
+	return chunks, nil
+}
+
+func extractPPTXSlideText(file *zip.File) (string, error) {
+	stream, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer stream.Close()
+	decoder := xml.NewDecoder(stream)
+	paragraphs := []string{}
+	var paragraph strings.Builder
+	inText := false
+	for {
+		token, tokenErr := decoder.Token()
+		if tokenErr == io.EOF {
+			break
+		}
+		if tokenErr != nil {
+			return "", tokenErr
+		}
+		switch value := token.(type) {
+		case xml.StartElement:
+			if value.Name.Local == "t" {
+				inText = true
+			}
+		case xml.CharData:
+			if inText {
+				paragraph.Write([]byte(value))
+			}
+		case xml.EndElement:
+			if value.Name.Local == "t" {
+				inText = false
+			}
+			if value.Name.Local == "p" {
+				if text := strings.TrimSpace(paragraph.String()); text != "" {
+					paragraphs = append(paragraphs, text)
+				}
+				paragraph.Reset()
+			}
+		}
+	}
+	if text := strings.TrimSpace(paragraph.String()); text != "" {
+		paragraphs = append(paragraphs, text)
+	}
+	return strings.Join(paragraphs, "\n"), nil
 }
 
 func splitText(text string, max int) []string {

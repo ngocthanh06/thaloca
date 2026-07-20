@@ -10,7 +10,7 @@
 // name; this module does not bind its own document listeners.
 import { api } from '../api'
 import type {
-  ActivitySummary, RepositoryActivity, Commit, RepoBranch, GitHubStatus, GitHubCLIAccount,
+  ActivitySummary, RepositoryActivity, Commit, RepoBranch, RepoTag, GitHubStatus, GitHubCLIAccount,
   DeviceCode, GraphCommit, PullRequest, PullRequestDetail, PullRequestFilter, PullRequestCounts,
   PullRequestCommit, CheckRun, PullRequestFile, ReviewComment, RepoEntry,
   FileChange, CommitFile, SecurityReport, GitHookStatus,
@@ -80,7 +80,7 @@ export type { RepoDetail }
 
 let sourceRepoFilter = ''
 interface RepoDetail {
-  tab: 'changes' | 'history' | 'graph' | 'branches' | 'files' | 'prs' | 'security'
+  tab: 'changes' | 'history' | 'graph' | 'branches' | 'tags' | 'files' | 'prs' | 'security'
   graph?: GraphCommit[]
   graphLimit?: number
   stashes?: string[]
@@ -90,6 +90,8 @@ interface RepoDetail {
   branches?: RepoBranch[]
   branchFilter?: string
   branchLimit?: number
+  tags?: RepoTag[]
+  tagFilter?: string
   dir: string
   entries?: RepoEntry[]
   file?: string
@@ -183,6 +185,10 @@ export async function loadRepoTab(path: string, tab: RepoDetail['tab']) {
       const branches = (await api.repoBranches(path)) || []
       if (stale()) return
       detail.branches = branches
+    } else if (tab === 'tags') {
+      const tags = (await api.repoTags(path)) || []
+      if (stale()) return
+      detail.tags = tags
     } else if (tab === 'files' && !detail.entries) {
       const entries = (await api.repoFiles(path, detail.dir)) || []
       if (stale()) return
@@ -441,6 +447,43 @@ export async function handleBranchAction(button: HTMLButtonElement) {
   // until the next full Refresh.
   document.dispatchEvent(new CustomEvent(ACTIVITY_REFRESH_EVENT))
   await loadRepoTab(repo, 'branches')
+}
+
+export async function handleTagAction(button: HTMLButtonElement) {
+  const repo = button.dataset.repo || ''
+  const tag = button.dataset.tag || ''
+  if (!repo) return
+  const detail = repoDetails.get(repo)
+  try {
+    if (button.dataset.tagCreate) {
+      const form = button.closest('[data-tag-form]')
+      const name = (form?.querySelector('[data-tag-name]') as HTMLInputElement | null)?.value.trim() || ''
+      const target = (form?.querySelector('[data-tag-target]') as HTMLInputElement | null)?.value.trim() || 'HEAD'
+      const message = (form?.querySelector('[data-tag-message]') as HTMLInputElement | null)?.value.trim() || ''
+      if (!name || !message) {
+        showError('Enter both a tag name and release message.')
+        return
+      }
+      await api.createTag(repo, name, target, message)
+    } else if (button.dataset.tagCheckout) {
+      if (!(await api.confirmDialog('Checkout tag', `Checkout "${tag}" in detached HEAD mode? Create a branch before committing changes.`))) return
+      await api.checkoutTag(repo, tag)
+      if (detail) detail.commits = undefined
+      document.dispatchEvent(new CustomEvent(ACTIVITY_REFRESH_EVENT))
+    } else if (button.dataset.tagPush) {
+      if (!(await api.confirmDialog('Publish release tag', `Push tag "${tag}" to origin?`))) return
+      await api.pushTag(repo, tag)
+    } else if (button.dataset.tagDeleteRemote) {
+      if (!(await api.confirmDialog('Delete remote tag', `Permanently delete tag "${tag}" from origin? The local tag will remain.`))) return
+      await api.deleteRemoteTag(repo, tag)
+    } else if (button.dataset.tagDelete) {
+      if (!(await api.confirmDialog('Delete local tag', `Delete local tag "${tag}"? This does not delete the remote tag.`))) return
+      await api.deleteTag(repo, tag)
+    }
+  } catch (error) {
+    showError(String(error))
+  }
+  await loadRepoTab(repo, 'tags')
 }
 
 export async function handleFileAction(button: HTMLButtonElement) {
@@ -972,6 +1015,20 @@ export function handleBranchFilterInput(event: Event) {
   }
 }
 
+export function handleTagFilterInput(event: Event) {
+  const target = event.target as HTMLInputElement | null
+  if (target?.id !== 'tag-filter') return
+  const detail = repoDetails.get(target.dataset.repo || '')
+  if (!detail) return
+  detail.tagFilter = target.value
+  renderSource()
+  const el = document.getElementById('tag-filter') as HTMLInputElement | null
+  if (el) {
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }
+}
+
 function renderRepoDetail(repo: RepositoryActivity): string {
   const detail = repoDetails.get(repo.path)
   if (!detail) return ''
@@ -982,6 +1039,7 @@ function renderRepoDetail(repo: RepositoryActivity): string {
       <button class="subtab ${detail.tab === 'history' ? 'active' : ''}" data-repo-tab="history" data-repo="${path}">History</button>
       <button class="subtab ${detail.tab === 'graph' ? 'active' : ''}" data-repo-tab="graph" data-repo="${path}">Graph</button>
       <button class="subtab ${detail.tab === 'branches' ? 'active' : ''}" data-repo-tab="branches" data-repo="${path}">Branches</button>
+      <button class="subtab ${detail.tab === 'tags' ? 'active' : ''}" data-repo-tab="tags" data-repo="${path}">Tags</button>
       <button class="subtab ${detail.tab === 'files' ? 'active' : ''}" data-repo-tab="files" data-repo="${path}">Files</button>
       <button class="subtab ${detail.tab === 'prs' ? 'active' : ''}" data-repo-tab="prs" data-repo="${path}">Pull Requests</button>
       <button class="subtab ${detail.tab === 'security' ? 'active' : ''}" data-repo-tab="security" data-repo="${path}">Security</button>
@@ -1028,6 +1086,35 @@ function renderRepoDetail(repo: RepositoryActivity): string {
         <div class="load-more-row">
           <button class="repo-action" data-branch-more="1" data-repo="${path}">Show more (${shown.length}/${filtered.length})</button>
         </div>` : ''}`
+  } else if (detail.tab === 'tags') {
+    const allTags = detail.tags || []
+    const filter = (detail.tagFilter || '').trim().toLowerCase()
+    const tags = filter ? allTags.filter(tag => tag.name.toLowerCase().includes(filter) || tag.subject.toLowerCase().includes(filter)) : allTags
+    body = `
+      <div class="branch-toolbar tag-toolbar" data-tag-form>
+        <input id="tag-filter" class="search-input branch-input" type="search" placeholder="Search ${allTags.length} tags..." value="${escapeHTML(detail.tagFilter || '')}" data-repo="${path}">
+        <input class="search-input branch-input" data-tag-name placeholder="v1.0.0">
+        <input class="search-input branch-input" data-tag-target placeholder="Target (default HEAD)">
+        <input class="search-input branch-input" data-tag-message placeholder="Release message">
+        <button class="repo-action" data-tag-create="1" data-repo="${path}">Create release tag</button>
+      </div>
+      <p class="resource-detail muted">Release tags are annotated locally. Push explicitly when the tag is ready to publish.</p>
+      ${tags.length === 0
+        ? `<div class="empty compact">${filter ? 'No tags match the search.' : 'No local tags found.'}</div>`
+        : tags.map(tag => `
+          <div class="branch-row tag-row">
+            <span class="branch-name">
+              <strong>${escapeHTML(tag.name)}</strong>
+              <small>${escapeHTML(tag.commit_hash)} · ${tag.annotated ? 'annotated' : 'lightweight'}${tag.created_at ? ` · ${escapeHTML(formatDate(tag.created_at))}` : ''}</small>
+              ${tag.subject ? `<span class="resource-detail">${escapeHTML(tag.subject)}</span>` : ''}
+            </span>
+            <span class="branch-actions">
+              <button class="repo-action" data-tag-checkout="1" data-repo="${path}" data-tag="${escapeHTML(tag.name)}">Checkout</button>
+              <button class="repo-action" data-tag-push="1" data-repo="${path}" data-tag="${escapeHTML(tag.name)}">Push</button>
+              <button class="repo-action danger" data-tag-delete="1" data-repo="${path}" data-tag="${escapeHTML(tag.name)}">Delete local</button>
+              <button class="repo-action danger" data-tag-delete-remote="1" data-repo="${path}" data-tag="${escapeHTML(tag.name)}">Delete remote</button>
+            </span>
+          </div>`).join('')}`
   } else {
     const crumbs = detail.dir ? detail.dir.split('/') : []
     let crumbPath = ''

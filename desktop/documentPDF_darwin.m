@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <PDFKit/PDFKit.h>
 
-char *ThalocaExtractPDFPages(const char *path) {
+char *ThalocaExtractPDFPages(const char *path, int maxPages) {
     @autoreleasepool {
         NSString *pathString = [NSString stringWithUTF8String:path];
         PDFDocument *document = pathString
@@ -10,6 +10,8 @@ char *ThalocaExtractPDFPages(const char *path) {
         NSMutableDictionary *result = [NSMutableDictionary dictionary];
         if (!document) {
             result[@"error"] = @"PDFKit could not open the document";
+        } else if (maxPages > 0 && document.pageCount > maxPages) {
+            result[@"error"] = [NSString stringWithFormat:@"PDF exceeds the %d page automatic indexing limit", maxPages];
         } else {
             NSMutableArray *pages = [NSMutableArray arrayWithCapacity:document.pageCount];
             for (NSInteger i = 0; i < document.pageCount; i++) {

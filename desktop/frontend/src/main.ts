@@ -26,13 +26,13 @@ import type { ContainerTerminalStatus } from './containerTerminal'
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import {
   renderServicesView, renderPortsView, renderJobsView, toggleProjectExpanded, expandProject,
-  checkAllHealth as checkAllHealthRuntime, renderRuntimeEngineCard,
+  checkAllHealth as checkAllHealthRuntime, loadContainerSizes, renderRuntimeEngineCard,
 } from './views/runtime'
 import {
   renderSourceView, setSourceFilter, openRepoInSourceControl, togglePinRepo,
   loadRepoTab, refreshGHStatus, handleGHAction, handleSyncAction, handleLoadMore,
-  handleCommitAction, handleChangesAction, handleDiffViewToggle, handleBranchAction, handleFileAction,
-  handlePRAction, handlePRFilterSelectChange, handlePRSearchInput, handleBranchFilterInput,
+  handleCommitAction, handleChangesAction, handleDiffViewToggle, handleBranchAction, handleTagAction, handleFileAction,
+  handlePRAction, handlePRFilterSelectChange, handlePRSearchInput, handleBranchFilterInput, handleTagFilterInput,
   initDiffCommentDrag, ACTIVITY_REFRESH_EVENT, type RepoDetail,
   runSecurityScan, toggleGitHook,
 } from './views/sourceControl'
@@ -42,11 +42,16 @@ import {
 } from './views/security'
 import { initLogsView, renderLogsView, stopLogsPolling } from './views/logs'
 import { initDocumentsView, loadDocumentsView } from './views/documents'
+import { initCapturesView, loadCapturesView } from './views/captures'
+import { initIncidentsView, loadIncidentsView } from './views/incidents'
+import { initAIMonitorView, loadAIMonitorView } from './views/aiMonitor'
 import { openServiceInspector, closeServiceInspector, runServiceAction } from './components/serviceInspector'
 import { initCommandPalette, setCommandPaletteIndex, type CommandItem } from './components/commandPalette'
 import { initSettingsPanel, openSettingsPanel } from './components/settingsPanel'
 import { initClipboardHistoryPanel, openClipboardHistoryPanel } from './components/clipboardHistoryPanel'
+import { matchShortcut } from './keyboardShortcuts'
 import { parsePortConflict, showPortConflictAssistant } from './components/portConflictAssistant'
+import { initFastTooltips } from './components/fastTooltip'
 
 let services: Service[] = []
 let ports: PortUsage[] = []
@@ -109,6 +114,8 @@ let serverBulkRun: ServerBulkRunState | null = null
 let serverBulkJobIds: Map<string, string> = new Map()
 let serverBulkRunTimer: number | null = null
 let healthCache: Map<string, HealthStatus> = new Map()
+let containerSizeCache: Map<string, string> = new Map()
+let containerSizesInFlight: Promise<void> | null = null
 let refreshTimer: number | null = null
 let searchQuery = ''
 // Activity: which repo card (by path) is expanded inline — showing recent
@@ -150,6 +157,31 @@ function toggleTheme(): void {
   renderThemeToggleIcon()
 }
 
+const SIDEBAR_GROUPS = [
+  { id: 'workspace', label: 'Workspace', views: ['overview', 'source', 'documents'] },
+  { id: 'operations', label: 'Operations', views: ['incidents', 'runtime', 'resources', 'servers', 'logs', 'security'] },
+  { id: 'utilities', label: 'Utilities', views: ['tools', 'ai-monitor', 'captures'] },
+] as const
+
+function groupSidebarNavigation(): void {
+  const nav = document.querySelector<HTMLElement>('.sidebar .nav')
+  if (!nav) return
+  for (const group of SIDEBAR_GROUPS) {
+    const wrapper = document.createElement('div')
+    wrapper.className = 'nav-group'
+    wrapper.dataset.navGroup = group.id
+    const title = document.createElement('div')
+    title.className = 'nav-group-title'
+    title.textContent = t(group.label)
+    wrapper.appendChild(title)
+    for (const view of group.views) {
+      const button = nav.querySelector<HTMLElement>(`.nav-btn[data-view="${view}"]`)
+      if (button) wrapper.appendChild(button)
+    }
+    nav.appendChild(wrapper)
+  }
+}
+
 function renderApp() {
   applyStoredTheme()
   const app = document.getElementById('app')!
@@ -172,6 +204,7 @@ function renderApp() {
             </svg>
             <span>${t('Overview')}</span>
           </button>
+          <button class="nav-btn" data-view="incidents"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.6 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/></svg><span>${t('Incidents')}</span></button>
           <button class="nav-btn" data-view="runtime">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
@@ -217,6 +250,8 @@ function renderApp() {
             <span>${t('Security')}</span>
           </button>
           <button class="nav-btn" data-view="documents"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h6l2 2h8v14H4z"/><path d="M8 11h8M8 15h6"/></svg><span>Documents</span></button>
+          <button class="nav-btn" data-view="captures"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span>Captures</span></button>
+          <button class="nav-btn" data-view="ai-monitor"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M9 2v4M15 2v4M8 11h.01M16 11h.01M9 15h6"/></svg><span>${t('AI Services')}</span></button>
         </nav>
         <div class="local-status">
           <div class="pulse"></div>
@@ -367,11 +402,15 @@ function renderApp() {
           <div id="security-content"></div>
         </section>
         <section id="documents-view" class="view"><div id="documents-content"></div></section>
+        <section id="captures-view" class="view"><div id="captures-content"></div></section>
+        <section id="incidents-view" class="view"><div id="incidents-content"></div></section>
+        <section id="ai-monitor-view" class="view"><div id="ai-monitor-content"></div></section>
 
       </main>
       <aside id="inspector-panel" class="inspector-panel"></aside>
     </div>
   `
+  groupSidebarNavigation()
   renderThemeToggleIcon()
   bindEvents()
 }
@@ -380,7 +419,7 @@ function switchView(view: string) {
   document.querySelectorAll('.nav-btn, .view').forEach(el => el.classList.remove('active'))
   document.querySelector(`.nav-btn[data-view="${view}"]`)?.classList.add('active')
   document.getElementById(`${view}-view`)?.classList.add('active')
-  const titles: Record<string, string> = { overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'), resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'), security: t('Security'), documents: 'Documents' }
+  const titles: Record<string, string> = { overview: t('Overview'), incidents: t('Incidents'), runtime: t('Runtime'), source: t('Source Control'), resources: t('Resources'), tools: t('Tools'), 'ai-monitor': t('AI Services'), servers: t('Servers'), logs: t('Logs'), security: t('Security'), documents: 'Documents', captures: 'Captures' }
   document.getElementById('view-title')!.textContent = titles[view] || view
   closeServiceInspector()
 
@@ -397,7 +436,10 @@ function switchView(view: string) {
     resourcesTimer = null
   }
 
-  if (view === 'runtime') void loadContainerRuntimeStatus()
+  if (view === 'runtime') {
+    void loadContainerRuntimeStatus()
+    void loadVisibleContainerSizes()
+  }
 
   // Tools & Packages is detection-only (no live values to poll) — load once
   // per visit, with a manual Refresh button for after installing something.
@@ -411,6 +453,9 @@ function switchView(view: string) {
     void loadServers()
   }
   if (view === 'documents') void loadDocumentsView()
+  if (view === 'captures') void loadCapturesView()
+  if (view === 'incidents') void loadIncidentsView()
+  if (view === 'ai-monitor') void loadAIMonitorView()
 
   // Managed Logs only polls its currently-selected source while its own tab
   // is visible — leaving the tab stops the interval instead of tailing a
@@ -454,12 +499,17 @@ function setText(selector: string, text: string): void {
 
 function applyLocaleToShell(): void {
   setText('.brand small', t('Developer Control Center'))
+  for (const group of SIDEBAR_GROUPS) {
+    setText(`[data-nav-group="${group.id}"] .nav-group-title`, t(group.label))
+  }
 
   const navLabels: Record<string, string> = {
     overview: t('Overview'), runtime: t('Runtime'), source: t('Source Control'),
     resources: t('Resources'), tools: t('Tools'), servers: t('Servers'), logs: t('Logs'),
     security: t('Security'),
+    incidents: t('Incidents'), 'ai-monitor': t('AI Services'),
     documents: 'Documents',
+    captures: 'Captures',
   }
   Object.entries(navLabels).forEach(([view, label]) => setText(`.nav-btn[data-view="${view}"] span`, label))
 
@@ -1577,6 +1627,10 @@ function bindEvents() {
   document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchView(btn.getAttribute('data-view') || 'overview'))
   })
+  document.addEventListener('keydown', event => {
+    const view = matchShortcut(event)
+    if (view) { event.preventDefault(); switchView(view) }
+  })
 
   document.getElementById('tools-refresh')!.addEventListener('click', event => { void refreshTools(event.currentTarget as HTMLButtonElement) })
 
@@ -1594,7 +1648,11 @@ function bindEvents() {
   initCommandPalette()
   initSettingsPanel()
   initClipboardHistoryPanel()
+  initFastTooltips()
   initDocumentsView()
+  initCapturesView()
+  initIncidentsView()
+  initAIMonitorView()
   document.addEventListener('thaloca:refresh', () => { void refreshRuntime() })
   // views/sourceControl.ts dispatches this after a fetch/pull/push/stash —
   // ahead/behind/changed counts live in `activity`, owned here.
@@ -1623,6 +1681,7 @@ function bindEvents() {
   document.addEventListener('click', handleDocumentClick)
   document.addEventListener('change', handleDocumentChange)
   document.addEventListener('input', handleBranchFilterInput)
+  document.addEventListener('input', handleTagFilterInput)
   document.addEventListener('input', event => {
     const target = event.target as HTMLInputElement | null
     // Keeps the typed command from being lost if an unrelated action (e.g.
@@ -1855,6 +1914,19 @@ async function doLoadRuntime(force: boolean) {
   await checkAllHealth()
   renderServices()
 
+  // Size discovery is deliberately detached from the main snapshot: Docker
+  // can take a while to compute it, and Runtime should render immediately.
+  void loadVisibleContainerSizes()
+}
+
+function loadVisibleContainerSizes(): Promise<void> {
+  if (!document.getElementById('runtime-view')?.classList.contains('active')) return Promise.resolve()
+  if (!containerSizesInFlight) {
+    containerSizesInFlight = loadContainerSizes(services, containerSizeCache)
+      .then(() => { renderServices() })
+      .finally(() => { containerSizesInFlight = null })
+  }
+  return containerSizesInFlight
 }
 
 // Overview's Runtime/Source summary lines are derived from data already
@@ -1867,14 +1939,17 @@ function renderOverview(): void {
 function rebuildCommandIndex(): void {
   const viewItems: CommandItem[] = [
     { id: 'view:overview', label: `${t('Go to')} ${t('Overview')}`, kind: 'view', run: () => switchView('overview') },
+    { id: 'view:incidents', label: `${t('Go to')} ${t('Incidents')}`, kind: 'view', run: () => switchView('incidents') },
     { id: 'view:runtime', label: `${t('Go to')} ${t('Runtime')}`, kind: 'view', run: () => switchView('runtime') },
     { id: 'view:source', label: `${t('Go to')} ${t('Source Control')}`, kind: 'view', run: () => switchView('source') },
     { id: 'view:repositories', label: `${t('Go to')} ${t('Repositories')}`, kind: 'view', run: () => { switchView('source'); selectSourceSubtab('repositories') } },
     { id: 'view:resources', label: `${t('Go to')} ${t('Resources')}`, kind: 'view', run: () => switchView('resources') },
     { id: 'view:tools', label: `${t('Go to')} ${t('Tools')}`, kind: 'view', run: () => switchView('tools') },
+    { id: 'view:ai-monitor', label: `${t('Go to')} ${t('AI Services')}`, kind: 'view', run: () => switchView('ai-monitor') },
     { id: 'view:servers', label: `${t('Go to')} ${t('Servers')}`, kind: 'view', run: () => switchView('servers') },
     { id: 'view:logs', label: `${t('Go to')} ${t('Logs')}`, kind: 'view', run: () => switchView('logs') },
     { id: 'view:documents', label: `${t('Go to')} Documents`, kind: 'view', run: () => switchView('documents') },
+    { id: 'view:captures', label: `${t('Go to')} Captures`, kind: 'view', run: () => switchView('captures') },
     {
       id: 'view:config-files', label: `${t('Go to')} ${t('Config Files')}`, kind: 'view', run: () => {
         switchView('tools')
@@ -1929,7 +2004,32 @@ function rebuildCommandIndex(): void {
       run: () => { switchView('servers'); void toggleServerTerminal(s.id) },
     },
   ])
-  setCommandPaletteIndex([...viewItems, ...serviceItems, ...actionItems, ...repoItems, ...serverItems])
+  const baseItems = [...viewItems, ...serviceItems, ...actionItems, ...repoItems, ...serverItems]
+  setCommandPaletteIndex(baseItems)
+  void Promise.all([api.documentLibrary(), api.listCaptures(), api.productPreferences()]).then(([documents, captures, preferences]) => {
+    const documentItems: CommandItem[] = documents.documents.map(document => ({
+      id: `document:${document.path}`,
+      label: document.name,
+      hint: `${t('Document')} · ${document.relative_path}`,
+      kind: 'action',
+      run: () => { switchView('documents'); void api.openDocument(document.path) },
+    }))
+    const captureItems: CommandItem[] = captures.captures.map(capture => ({
+      id: `capture:${capture.path}`,
+      label: capture.name,
+      hint: `Capture · ${capture.kind}`,
+      kind: 'action',
+      run: () => { switchView('captures'); void api.openCapture(capture.path) },
+    }))
+    const workspaceItems: CommandItem[] = preferences.workspaces.map(workspace => ({
+      id: `workspace:${workspace.id}`,
+      label: `${t('Open workspace:')} ${workspace.name}`,
+      hint: `${workspace.projects.length} ${t('projects')}`,
+      kind: 'action',
+      run: () => { localStorage.setItem('thaloca-overview-workspace', workspace.id); switchView('overview'); renderOverview() },
+    }))
+    setCommandPaletteIndex([...baseItems, ...documentItems, ...captureItems, ...workspaceItems])
+  }).catch(() => undefined)
 }
 
 async function loadActivity(force = false) {
@@ -1950,7 +2050,7 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install], [data-open-vpn-settings]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-tag-create], [data-tag-checkout], [data-tag-push], [data-tag-delete], [data-tag-delete-remote], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install], [data-open-vpn-settings]')
   if (!button) {
     // Source Control's Repositories tab: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -2396,6 +2496,11 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.tagCreate || button.dataset.tagCheckout || button.dataset.tagPush || button.dataset.tagDelete || button.dataset.tagDeleteRemote) {
+    await handleTagAction(button)
+    return
+  }
+
   if (button.dataset.fileNav !== undefined || button.dataset.fileOpen || button.dataset.fileClose || button.dataset.fileMaximize) {
     await handleFileAction(button)
     return
@@ -2675,7 +2780,7 @@ async function handleDocumentChange(event: Event) {
 // module's state — see that file's header comment).
 function renderServices(): void {
   renderServicesView({
-    services, ports, jobs, dockerStatus, searchQuery, healthCache, pendingContainers, jobLogs, projectLogs,
+    services, ports, jobs, dockerStatus, searchQuery, healthCache, sizeCache: containerSizeCache, pendingContainers, jobLogs, projectLogs,
     processLogs, pendingProjects, imageScans: containerImageScans, terminals: containerTerminals,
   })
   // Same re-parenting trick as renderServers' server terminal: each open

@@ -10,8 +10,20 @@ test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page
   await page.goto('/')
   await page.waitForSelector('.nav-btn')
 
-  const navLabels = await page.locator('.nav-btn span').allTextContents()
-  expect(navLabels).toEqual(['Overview', 'Runtime', 'Source Control', 'Resources', 'Tools', 'Servers', 'Logs', 'Security', 'Documents'])
+  const groups = await page.locator('.nav-group').evaluateAll(nodes => nodes.map(node => ({
+    label: node.querySelector('.nav-group-title')?.textContent,
+    tabs: Array.from(node.querySelectorAll('.nav-btn span')).map(tab => tab.textContent),
+  })))
+  expect(groups).toEqual([
+    { label: 'Workspace', tabs: ['Overview', 'Source Control', 'Documents'] },
+    { label: 'Operations', tabs: ['Incidents', 'Runtime', 'Resources', 'Servers', 'Logs', 'Security'] },
+    { label: 'Utilities', tabs: ['Tools', 'AI Services', 'Captures'] },
+  ])
+
+  for (const view of ['incidents', 'ai-monitor']) {
+    await page.click(`.nav-btn[data-view="${view}"]`)
+    await expect(page.locator(`#${view}-view`)).toHaveClass(/active/)
+  }
 
   await page.click('.nav-btn[data-view="runtime"]')
   const subtabLabels = await page.locator('#services-subtabs .subtab').allTextContents()

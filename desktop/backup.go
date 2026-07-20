@@ -15,20 +15,43 @@ import (
 // never the key's contents (Thaloca never reads it), so nothing here needs
 // redaction — there is no secret to redact in the first place.
 type ConfigBackup struct {
-	Servers              []ServerConnection   `json:"servers"`
-	IgnoredRepos         []string             `json:"ignored_repos"`
-	EventRepos           []string             `json:"event_repos"`
-	MineOnly             bool                 `json:"mine_only"`
-	PinnedRepos          []string             `json:"pinned_repos"`
-	NotificationSettings NotificationSettings `json:"notification_settings"`
-	ExportedAt           string               `json:"exported_at"`
+	Servers                   []ServerConnection   `json:"servers"`
+	IgnoredRepos              []string             `json:"ignored_repos"`
+	EventRepos                []string             `json:"event_repos"`
+	MineOnly                  bool                 `json:"mine_only"`
+	PinnedRepos               []string             `json:"pinned_repos"`
+	KeyboardShortcuts         map[string]string    `json:"keyboard_shortcuts"`
+	NotificationSettings      NotificationSettings `json:"notification_settings"`
+	ProductPreferences        ProductPreferences   `json:"product_preferences"`
+	DocumentRoots             []DocumentRoot       `json:"document_roots"`
+	DocumentExclusions        []string             `json:"document_exclusions"`
+	ExportedAt                string               `json:"exported_at"`
+	documentRootsPresent      bool
+	documentExclusionsPresent bool
+}
+
+func (backup *ConfigBackup) UnmarshalJSON(data []byte) error {
+	type configBackupAlias ConfigBackup
+	var decoded configBackupAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*backup = ConfigBackup(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, backup.documentRootsPresent = fields["document_roots"]
+	_, backup.documentExclusionsPresent = fields["document_exclusions"]
+	return nil
 }
 
 // ExportConfig bundles servers, repo preferences, and notification
-// settings into one JSON file via a native save dialog. pinnedRepos is
-// passed in from the frontend since pinning lives in browser localStorage,
-// not a Go-side file. Returns "" (no error) if the user cancels the dialog.
-func (a *App) ExportConfig(pinnedRepos []string) (string, error) {
+// settings into one JSON file via a native save dialog. pinnedRepos and
+// keyboardShortcuts are passed in from the frontend since both live in
+// browser localStorage, not a Go-side file. Returns "" (no error) if the
+// user cancels the dialog.
+func (a *App) ExportConfig(pinnedRepos []string, keyboardShortcuts map[string]string) (string, error) {
 	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
 		Title:           "Export Thaloca config",
 		DefaultFilename: "thaloca-config.json",
@@ -39,13 +62,18 @@ func (a *App) ExportConfig(pinnedRepos []string) (string, error) {
 	}
 
 	settings := loadUserSettings()
+	documents := loadDocumentLibrary()
 	backup := ConfigBackup{
 		Servers:              loadServers(),
 		IgnoredRepos:         sortedKeys(settings.IgnoredRepos),
 		EventRepos:           sortedKeys(settings.EventRepos),
 		MineOnly:             settings.MineOnly,
 		PinnedRepos:          pinnedRepos,
+		KeyboardShortcuts:    keyboardShortcuts,
 		NotificationSettings: loadNotificationSettings(),
+		ProductPreferences:   loadProductPreferences(),
+		DocumentRoots:        documents.Roots,
+		DocumentExclusions:   documents.ExcludedPaths,
 		ExportedAt:           time.Now().Format(time.RFC3339),
 	}
 	data, err := json.MarshalIndent(backup, "", "  ")
@@ -60,8 +88,8 @@ func (a *App) ExportConfig(pinnedRepos []string) (string, error) {
 
 // ImportConfig reads a previously exported bundle (via a native open
 // dialog) and restores servers, repo preferences, and notification
-// settings. PinnedRepos is returned (not restored here) for the frontend
-// to write back into its own localStorage.
+// settings. PinnedRepos and KeyboardShortcuts are returned (not restored
+// here) for the frontend to write back into its own localStorage.
 func (a *App) ImportConfig() (ConfigBackup, error) {
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title:   "Import Thaloca config",
@@ -114,6 +142,23 @@ func (a *App) ImportConfig() (ConfigBackup, error) {
 		}
 	} else {
 		backup.NotificationSettings = loadNotificationSettings()
+	}
+	if backup.ProductPreferences.ExpectedProjects != nil || backup.ProductPreferences.Workspaces != nil || backup.ProductPreferences.DocumentPolicies != nil {
+		if err := saveProductPreferences(backup.ProductPreferences); err != nil {
+			return ConfigBackup{}, err
+		}
+	}
+	if backup.documentRootsPresent || backup.documentExclusionsPresent {
+		documents := loadDocumentLibrary()
+		if backup.documentRootsPresent {
+			documents.Roots = backup.DocumentRoots
+		}
+		if backup.documentExclusionsPresent {
+			documents.ExcludedPaths = backup.DocumentExclusions
+		}
+		if err := saveDocumentLibrary(documents); err != nil {
+			return ConfigBackup{}, err
+		}
 	}
 	return backup, nil
 }

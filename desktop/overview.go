@@ -13,12 +13,13 @@ import (
 // (currently the Docker Compose project label; anything without one is
 // grouped under "Unassigned"). Recomputed live on every Snapshot() call.
 type ProjectGroup struct {
-	Name     string    `json:"name"`
-	Services []Service `json:"services"`
-	Total    int       `json:"total"`
-	Healthy  int       `json:"healthy"`
-	Degraded int       `json:"degraded"`
-	Down     int       `json:"down"`
+	Name          string    `json:"name"`
+	Services      []Service `json:"services"`
+	Total         int       `json:"total"`
+	Healthy       int       `json:"healthy"`
+	Degraded      int       `json:"degraded"`
+	Down          int       `json:"down"`
+	ExpectedState string    `json:"expected_state,omitempty"`
 }
 
 // Anomaly is a transient alert derived by diffing consecutive Snapshot()
@@ -113,6 +114,26 @@ func (a *App) Snapshot(force bool) Snapshot {
 	anomalies := a.detectAnomalies(services)
 	anomalies = append(anomalies, detectJobAnomalies(jobs)...)
 	anomalies = append(anomalies, a.detectLogAnomalies(ctx, services)...)
+	prefs := loadProductPreferences()
+	for i := range projects {
+		state := prefs.ExpectedProjects[projects[i].Name]
+		if state == "" {
+			state = "required"
+		}
+		projects[i].ExpectedState = state
+		if state == "on_demand" || state == "muted" {
+			projects[i].Down = 0
+			projects[i].Degraded = 0
+		}
+	}
+	filtered := anomalies[:0]
+	for _, anomaly := range anomalies {
+		state := prefs.ExpectedProjects[anomaly.Project]
+		if state != "on_demand" && state != "muted" {
+			filtered = append(filtered, anomaly)
+		}
+	}
+	anomalies = filtered
 	a.notifyAnomalies(anomalies)
 	sort.Slice(anomalies, func(i, j int) bool { return anomalies[i].Severity < anomalies[j].Severity })
 	if anomalies == nil {

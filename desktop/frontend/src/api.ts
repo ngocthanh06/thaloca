@@ -116,6 +116,15 @@ export interface RepoBranch {
   current: boolean
 }
 
+export interface RepoTag {
+  name: string
+  commit_hash: string
+  subject: string
+  creator: string
+  created_at: string
+  annotated: boolean
+}
+
 export interface GitHubStatus {
   configured: boolean
   authenticated: boolean
@@ -155,7 +164,7 @@ export interface ContainerRuntimeStatus {
   homebrew_available: boolean
 }
 
-export interface DocumentRoot { path: string; added_at: string }
+export interface DocumentRoot { path: string; added_at: string; name?: string }
 export interface ManagedDocument {
   id: string; root: string; path: string; relative_path: string; name: string; file_type: string; size: number; modified_at: number
   content_hash?: string; tags: string[]; index_status: string; indexed_at?: string; error?: string; chunk_count: number
@@ -167,15 +176,25 @@ export interface LongbrainDocumentStatus {
 }
 export interface DocumentScanProgress {
   phase: string; current_file?: string; discovered: number; pending: number; indexed: number; failed: number
+  total_chunks?: number; cache_hits?: number; cache_misses?: number; embedding_requests?: number; embedding_ms?: number; elapsed_ms?: number
+  embedding_batches?: Array<{ texts: number; duration_ms: number }>
 }
 export interface DocumentSnapshot {
-  roots: DocumentRoot[]; documents: ManagedDocument[]; longbrain: LongbrainDocumentStatus; scanning: boolean; scan_cancelled: boolean; last_scan_at?: string; scan_progress?: DocumentScanProgress
+  roots: DocumentRoot[]; documents: ManagedDocument[]; excluded_paths?: string[]; longbrain: LongbrainDocumentStatus; scanning: boolean; scan_cancelled: boolean; last_scan_at?: string; scan_progress?: DocumentScanProgress
 }
 export interface DocumentSearchHit {
-  document_id: string; path: string; file_name: string; file_type: string; chunk_index: number; page?: number; line_start?: number; line_end?: number
+  document_id: string; path: string; file_name: string; file_type: string; chunk_index: number; page?: number; slide?: number; line_start?: number; line_end?: number
   paragraph_start?: number; paragraph_end?: number; heading?: string; text: string; score: number
 }
 export interface DocumentAnswer { answer: string; citations: DocumentSearchHit[] }
+
+// One screenshot/recording in the macOS capture folder (see
+// desktop/captures.go — the filesystem is the source of truth, there is no
+// persisted library behind these).
+export interface CaptureFile { path: string; name: string; kind: string; size: number; modified_at: number }
+export interface CapturesSnapshot {
+  location: string; dedicated_folder: string; using_dedicated: boolean; captures: CaptureFile[]; error?: string
+}
 
 // One config file (or, for category "telemetry", one setting read out of a
 // config file) shown in the Config Files view. Only "shell" entries can be
@@ -345,7 +364,12 @@ export interface ProjectGroup {
   healthy: number
   degraded: number
   down: number
+  expected_state?: string
 }
+
+export interface WorkspaceProfile { id: string; name: string; projects: string[] }
+export interface DocumentRootPolicy { mode: string; max_mb: number; max_pages: number; max_slides: number }
+export interface ProductPreferences { expected_projects: Record<string, string>; workspaces: WorkspaceProfile[]; document_policies: Record<string, DocumentRootPolicy> }
 
 export interface Anomaly {
   service_id: string
@@ -670,7 +694,11 @@ export interface ConfigBackup {
   event_repos: string[]
   mine_only: boolean
   pinned_repos: string[]
+  keyboard_shortcuts: Record<string, string>
   notification_settings: NotificationSettings
+  product_preferences?: ProductPreferences
+  document_roots?: DocumentRoot[]
+  document_exclusions?: string[]
   exported_at: string
 }
 
@@ -870,12 +898,17 @@ export function normalizePorts(value: unknown): PortUsage[] {
 // falls back to a browser-safe default via `||` for that case.
 interface WailsApp {
   Snapshot(force: boolean): Promise<Partial<Snapshot>>
+  ProductPreferences(): Promise<ProductPreferences>
+  SetProjectExpectedState(project: string, state: string): Promise<ProductPreferences>
+  SaveWorkspaceProfile(profile: WorkspaceProfile): Promise<ProductPreferences>
+  DeleteWorkspaceProfile(id: string): Promise<ProductPreferences>
+  SetDocumentRootPolicy(root: string, policy: DocumentRootPolicy): Promise<ProductPreferences>
   Resources(): Promise<Partial<ResourceSnapshot>>
   InstalledApps(): Promise<InstalledApp[]>
   RefreshInstalledApps(): Promise<InstalledApp[]>
   GetNotificationSettings(): Promise<Partial<NotificationSettings>>
   SetNotificationSettings(settings: NotificationSettings): Promise<void>
-  ExportConfig(pinnedRepos: string[]): Promise<string>
+  ExportConfig(pinnedRepos: string[], keyboardShortcuts: Record<string, string>): Promise<string>
   ImportConfig(): Promise<Partial<ConfigBackup>>
   ResourceHistory(window: string): Promise<ResourceSample[]>
   RecordClipboardCopy(text: string, source: string): Promise<ClipboardEntry[]>
@@ -968,6 +1001,7 @@ interface WailsApp {
   IsFullscreen(): Promise<boolean>
   Confirm(title: string, message: string): Promise<boolean>
   ContainerLogs(id: string): Promise<string>
+  ContainerSize(id: string): Promise<string>
   ProjectLogs(project: string): Promise<string>
   ProcessLogs(pid: number): Promise<string>
   RepoCommits(path: string, limit: number, skip: number): Promise<Commit[]>
@@ -977,6 +1011,12 @@ interface WailsApp {
   DeleteBranch(path: string, name: string): Promise<void>
   SwitchBranch(path: string, name: string): Promise<void>
   MergeBranch(path: string, name: string): Promise<void>
+  RepoTags(path: string): Promise<RepoTag[]>
+  CreateTag(path: string, name: string, target: string, message: string): Promise<void>
+  CheckoutTag(path: string, name: string): Promise<void>
+  PushTag(path: string, name: string): Promise<void>
+  DeleteTag(path: string, name: string): Promise<void>
+  DeleteRemoteTag(path: string, name: string): Promise<void>
   RepoFiles(path: string, rel: string): Promise<RepoEntry[]>
   RepoFile(path: string, rel: string): Promise<string>
   RestartContainer(id: string): Promise<void>
@@ -1050,12 +1090,35 @@ interface WailsApp {
   DocumentLibrary(): Promise<DocumentSnapshot>
   AddDocumentFolder(path: string): Promise<DocumentSnapshot>
   RemoveDocumentFolder(path: string): Promise<DocumentSnapshot>
+  RenameDocumentFolder(path: string, name: string): Promise<DocumentSnapshot>
+  ExcludeDocument(path: string): Promise<DocumentSnapshot>
+  RestoreExcludedDocument(path: string): Promise<DocumentSnapshot>
   RefreshDocuments(): Promise<DocumentSnapshot>
   CancelDocumentScan(): Promise<boolean>
   SearchDocuments(query: string): Promise<DocumentSearchHit[]>
+  SemanticSearchDocuments(query: string): Promise<DocumentSearchHit[]>
   AskDocuments(question: string): Promise<DocumentAnswer>
+  AskDocumentPassages(question: string, passages: DocumentSearchHit[]): Promise<DocumentAnswer>
   OpenDocument(path: string): Promise<void>
+  PreviewDocument(path: string): Promise<void>
+  DocumentPlainText(path: string): Promise<string>
   RevealDocument(path: string): Promise<void>
+  ListCaptures(): Promise<CapturesSnapshot>
+  OpenCapture(path: string): Promise<void>
+  RevealCapture(path: string): Promise<void>
+  CopyCaptureFile(path: string): Promise<void>
+  CopyCaptureImage(path: string): Promise<void>
+  CaptureOCR(path: string): Promise<string>
+  EditCapture(path: string): Promise<void>
+  RenameCapture(path: string, newName: string): Promise<CapturesSnapshot>
+  DeleteCapture(path: string): Promise<CapturesSnapshot>
+  CaptureThumbnail(path: string): Promise<string>
+  PickCaptureFolder(): Promise<string>
+  UseDedicatedCaptureFolder(moveExisting: boolean): Promise<CapturesSnapshot>
+  SetCaptureFolder(path: string): Promise<CapturesSnapshot>
+  LoadCaptureImage(path: string): Promise<string>
+  SaveEditedCapture(path: string, dataURI: string): Promise<CapturesSnapshot>
+  SaveEditedCaptureAs(path: string, dataURI: string, suggestedName: string): Promise<string>
 }
 
 declare global {
@@ -1077,6 +1140,11 @@ export const api = {
     const fn = wailsApp()?.Snapshot
     return fn ? fn(force).then(normalizeSnapshot) : Promise.resolve(normalizeSnapshot(null))
   },
+  productPreferences: (): Promise<ProductPreferences> => wailsApp()?.ProductPreferences?.() || Promise.resolve({ expected_projects: {}, workspaces: [], document_policies: {} }),
+  setProjectExpectedState: (project: string, state: string): Promise<ProductPreferences> => wailsApp()?.SetProjectExpectedState?.(project, state) || Promise.reject('native not available'),
+  saveWorkspaceProfile: (profile: WorkspaceProfile): Promise<ProductPreferences> => wailsApp()?.SaveWorkspaceProfile?.(profile) || Promise.reject('native not available'),
+  deleteWorkspaceProfile: (id: string): Promise<ProductPreferences> => wailsApp()?.DeleteWorkspaceProfile?.(id) || Promise.reject('native not available'),
+  setDocumentRootPolicy: (root: string, policy: DocumentRootPolicy): Promise<ProductPreferences> => wailsApp()?.SetDocumentRootPolicy?.(root, policy) || Promise.reject('native not available'),
   resources: (): Promise<ResourceSnapshot> => {
     const fn = wailsApp()?.Resources
     return fn ? fn().then(normalizeResources) : Promise.resolve(normalizeResources(null))
@@ -1091,9 +1159,9 @@ export const api = {
     const fn = wailsApp()?.SetNotificationSettings
     return fn ? fn(settings) : Promise.reject(new Error('Wails runtime not available'))
   },
-  exportConfig: (pinnedRepos: string[]): Promise<string> => {
+  exportConfig: (pinnedRepos: string[], keyboardShortcuts: Record<string, string>): Promise<string> => {
     const fn = wailsApp()?.ExportConfig
-    return fn ? fn(pinnedRepos) : Promise.reject(new Error('Wails runtime not available'))
+    return fn ? fn(pinnedRepos, keyboardShortcuts) : Promise.reject(new Error('Wails runtime not available'))
   },
   importConfig: (): Promise<Partial<ConfigBackup>> => {
     const fn = wailsApp()?.ImportConfig
@@ -1377,6 +1445,7 @@ export const api = {
     return native ? native(title, message) : Promise.resolve(window.confirm(message))
   },
   containerLogs: (id: string) => wailsApp()?.ContainerLogs?.(id) || Promise.resolve(''),
+  containerSize: (id: string) => wailsApp()?.ContainerSize?.(id) || Promise.resolve(''),
   projectLogs: (project: string) => wailsApp()?.ProjectLogs?.(project) || Promise.resolve(''),
   processLogs: (pid: number) => wailsApp()?.ProcessLogs?.(pid) || Promise.resolve(''),
   repoCommits: (path: string, limit: number, skip: number): Promise<Commit[]> => wailsApp()?.RepoCommits?.(path, limit, skip) || Promise.resolve([]),
@@ -1386,6 +1455,12 @@ export const api = {
   deleteBranch: (path: string, name: string) => wailsApp()?.DeleteBranch?.(path, name) || Promise.resolve(),
   switchBranch: (path: string, name: string) => wailsApp()?.SwitchBranch?.(path, name) || Promise.resolve(),
   mergeBranch: (path: string, name: string) => wailsApp()?.MergeBranch?.(path, name) || Promise.resolve(),
+  repoTags: (path: string) => wailsApp()?.RepoTags?.(path) || Promise.resolve([]),
+  createTag: (path: string, name: string, target: string, message: string) => wailsApp()?.CreateTag?.(path, name, target, message) || Promise.resolve(),
+  checkoutTag: (path: string, name: string) => wailsApp()?.CheckoutTag?.(path, name) || Promise.resolve(),
+  pushTag: (path: string, name: string) => wailsApp()?.PushTag?.(path, name) || Promise.resolve(),
+  deleteTag: (path: string, name: string) => wailsApp()?.DeleteTag?.(path, name) || Promise.resolve(),
+  deleteRemoteTag: (path: string, name: string) => wailsApp()?.DeleteRemoteTag?.(path, name) || Promise.resolve(),
   repoFiles: (path: string, rel: string) => wailsApp()?.RepoFiles?.(path, rel) || Promise.resolve([]),
   repoFile: (path: string, rel: string) => wailsApp()?.RepoFile?.(path, rel) || Promise.resolve(''),
   restartContainer: (id: string) => wailsApp()?.RestartContainer?.(id) || Promise.resolve(),
@@ -1480,13 +1555,41 @@ export const api = {
     wailsApp()?.StopContainerRuntime?.(kind) || Promise.reject('native not available'),
   installColima: (): Promise<void> => wailsApp()?.InstallColima?.() || Promise.reject('native not available'),
   pickDocumentFolder: (): Promise<string> => wailsApp()?.PickDocumentFolder?.() || Promise.resolve(''),
-  documentLibrary: (): Promise<DocumentSnapshot> => wailsApp()?.DocumentLibrary?.() || Promise.resolve({ roots: [], documents: [], longbrain: { installed: false, healthy: false, qdrant_healthy: false, llm_available: false, embedding_provider: '', embedding_model: '', embedding_local: false, llm_provider: '', llm_model: '', llm_local: false, url: 'http://localhost:8800', install_url: 'https://longbrain.cc.cd', message: 'LongBrain is not installed' }, scanning: false, scan_cancelled: false }),
+  documentLibrary: (): Promise<DocumentSnapshot> => wailsApp()?.DocumentLibrary?.() || Promise.resolve({ roots: [], documents: [], excluded_paths: [], longbrain: { installed: false, healthy: false, qdrant_healthy: false, llm_available: false, embedding_provider: '', embedding_model: '', embedding_local: false, llm_provider: '', llm_model: '', llm_local: false, url: 'http://localhost:8800', install_url: 'https://longbrain.cc.cd', message: 'LongBrain is not installed' }, scanning: false, scan_cancelled: false }),
   addDocumentFolder: (path: string): Promise<DocumentSnapshot> => wailsApp()?.AddDocumentFolder?.(path) || Promise.reject('native not available'),
   removeDocumentFolder: (path: string): Promise<DocumentSnapshot> => wailsApp()?.RemoveDocumentFolder?.(path) || Promise.reject('native not available'),
+  renameDocumentFolder: (path: string, name: string): Promise<DocumentSnapshot> => wailsApp()?.RenameDocumentFolder?.(path, name) || Promise.reject('native not available'),
+  excludeDocument: (path: string): Promise<DocumentSnapshot> => wailsApp()?.ExcludeDocument?.(path) || Promise.reject('native not available'),
+  restoreExcludedDocument: (path: string): Promise<DocumentSnapshot> => wailsApp()?.RestoreExcludedDocument?.(path) || Promise.reject('native not available'),
   refreshDocuments: (): Promise<DocumentSnapshot> => wailsApp()?.RefreshDocuments?.() || Promise.reject('native not available'),
   cancelDocumentScan: (): Promise<boolean> => wailsApp()?.CancelDocumentScan?.() || Promise.resolve(false),
   searchDocuments: (query: string): Promise<DocumentSearchHit[]> => wailsApp()?.SearchDocuments?.(query) || Promise.resolve([]),
+  semanticSearchDocuments: (query: string): Promise<DocumentSearchHit[]> => wailsApp()?.SemanticSearchDocuments?.(query) || Promise.resolve([]),
   askDocuments: (question: string): Promise<DocumentAnswer> => wailsApp()?.AskDocuments?.(question) || Promise.reject('native not available'),
+  askDocumentPassages: (question: string, passages: DocumentSearchHit[]): Promise<DocumentAnswer> =>
+    wailsApp()?.AskDocumentPassages?.(question, passages) || Promise.reject('native not available'),
   openDocument: (path: string): Promise<void> => wailsApp()?.OpenDocument?.(path) || Promise.reject('native not available'),
+  previewDocument: (path: string): Promise<void> => wailsApp()?.PreviewDocument?.(path) || Promise.reject('native not available'),
+  documentPlainText: (path: string): Promise<string> => wailsApp()?.DocumentPlainText?.(path) || Promise.reject('native not available'),
   revealDocument: (path: string): Promise<void> => wailsApp()?.RevealDocument?.(path) || Promise.reject('native not available'),
+  listCaptures: (): Promise<CapturesSnapshot> => wailsApp()?.ListCaptures?.() || Promise.resolve({ location: '', dedicated_folder: '', using_dedicated: false, captures: [] }),
+  openCapture: (path: string): Promise<void> => wailsApp()?.OpenCapture?.(path) || Promise.reject('native not available'),
+  revealCapture: (path: string): Promise<void> => wailsApp()?.RevealCapture?.(path) || Promise.reject('native not available'),
+  copyCaptureFile: (path: string): Promise<void> => wailsApp()?.CopyCaptureFile?.(path) || Promise.reject('native not available'),
+  copyCaptureImage: (path: string): Promise<void> => wailsApp()?.CopyCaptureImage?.(path) || Promise.reject('native not available'),
+  captureOCR: (path: string): Promise<string> => wailsApp()?.CaptureOCR?.(path) || Promise.reject('native not available'),
+  editCapture: (path: string): Promise<void> => wailsApp()?.EditCapture?.(path) || Promise.reject('native not available'),
+  renameCapture: (path: string, newName: string): Promise<CapturesSnapshot> =>
+    wailsApp()?.RenameCapture?.(path, newName) || Promise.reject('native not available'),
+  deleteCapture: (path: string): Promise<CapturesSnapshot> => wailsApp()?.DeleteCapture?.(path) || Promise.reject('native not available'),
+  captureThumbnail: (path: string): Promise<string> => wailsApp()?.CaptureThumbnail?.(path) || Promise.resolve(''),
+  pickCaptureFolder: (): Promise<string> => wailsApp()?.PickCaptureFolder?.() || Promise.resolve(''),
+  useDedicatedCaptureFolder: (moveExisting: boolean): Promise<CapturesSnapshot> =>
+    wailsApp()?.UseDedicatedCaptureFolder?.(moveExisting) || Promise.reject('native not available'),
+  setCaptureFolder: (path: string): Promise<CapturesSnapshot> => wailsApp()?.SetCaptureFolder?.(path) || Promise.reject('native not available'),
+  loadCaptureImage: (path: string): Promise<string> => wailsApp()?.LoadCaptureImage?.(path) || Promise.reject('native not available'),
+  saveEditedCapture: (path: string, dataURI: string): Promise<CapturesSnapshot> =>
+    wailsApp()?.SaveEditedCapture?.(path, dataURI) || Promise.reject('native not available'),
+  saveEditedCaptureAs: (path: string, dataURI: string, suggestedName: string): Promise<string> =>
+    wailsApp()?.SaveEditedCaptureAs?.(path, dataURI, suggestedName) || Promise.reject('native not available'),
 }

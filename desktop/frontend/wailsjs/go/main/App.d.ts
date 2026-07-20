@@ -15,9 +15,15 @@ export function AddServer(arg1:string,arg2:string,arg3:number,arg4:string,arg5:s
 
 export function AppendTerminalHistory(arg1:string,arg2:string):Promise<void>;
 
+export function AskDocumentPassages(arg1:string,arg2:Array<main.DocumentSearchHit>):Promise<main.DocumentAnswer>;
+
 export function AskDocuments(arg1:string):Promise<main.DocumentAnswer>;
 
 export function CancelDocumentScan():Promise<boolean>;
+
+export function CaptureOCR(arg1:string):Promise<string>;
+
+export function CaptureThumbnail(arg1:string):Promise<string>;
 
 export function CheckForUpdate():Promise<main.UpdateInfo>;
 
@@ -26,6 +32,8 @@ export function CheckHealth(arg1:string):Promise<main.HealthStatus>;
 export function CheckServer(arg1:string):Promise<main.ServerHealth>;
 
 export function CheckServerDraft(arg1:string,arg2:number,arg3:string,arg4:string,arg5:string):Promise<main.ServerHealth>;
+
+export function CheckoutTag(arg1:string,arg2:string):Promise<void>;
 
 export function ClearClipboardHistory():Promise<void>;
 
@@ -51,6 +59,12 @@ export function ConnectServerVPN(arg1:string):Promise<void>;
 
 export function ContainerLogs(arg1:string):Promise<string>;
 
+export function ContainerSize(arg1:string):Promise<string>;
+
+export function CopyCaptureFile(arg1:string):Promise<void>;
+
+export function CopyCaptureImage(arg1:string):Promise<void>;
+
 export function CountPullRequests(arg1:string,arg2:main.PullRequestFilter):Promise<main.PullRequestCounts>;
 
 export function CreateBranch(arg1:string,arg2:string):Promise<void>;
@@ -59,11 +73,21 @@ export function CreatePullRequest(arg1:string,arg2:string,arg3:string,arg4:strin
 
 export function CreateReviewComment(arg1:string,arg2:number,arg3:string,arg4:string,arg5:number,arg6:string,arg7:number,arg8:string,arg9:string):Promise<void>;
 
+export function CreateTag(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
 export function DeleteBranch(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteCapture(arg1:string):Promise<main.CapturesSnapshot>;
 
 export function DeleteClipboardEntry(arg1:string):Promise<Array<main.ClipboardEntry>>;
 
 export function DeleteInstalledApp(arg1:string):Promise<void>;
+
+export function DeleteRemoteTag(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteTag(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteWorkspaceProfile(arg1:string):Promise<main.ProductPreferences>;
 
 export function DisableGitEvents(arg1:string):Promise<main.ActivitySummary>;
 
@@ -71,11 +95,17 @@ export function DisconnectServerVPN(arg1:string):Promise<void>;
 
 export function DocumentLibrary():Promise<main.DocumentSnapshot>;
 
+export function DocumentPlainText(arg1:string):Promise<string>;
+
 export function DownloadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function EditCapture(arg1:string):Promise<void>;
 
 export function EnableGitEvents(arg1:string):Promise<main.ActivitySummary>;
 
-export function ExportConfig(arg1:Array<string>):Promise<string>;
+export function ExcludeDocument(arg1:string):Promise<main.DocumentSnapshot>;
+
+export function ExportConfig(arg1:Array<string>,arg2:Record<string, string>):Promise<string>;
 
 export function FetchRepo(arg1:string):Promise<void>;
 
@@ -145,6 +175,8 @@ export function KeyPermissionWarning(arg1:string):Promise<string>;
 
 export function ListBrewPackages():Promise<main.BrewPackages>;
 
+export function ListCaptures():Promise<main.CapturesSnapshot>;
+
 export function ListConfigFiles():Promise<Array<main.ConfigFileEntry>>;
 
 export function ListEnvFiles():Promise<Array<main.EnvFileSummary>>;
@@ -173,6 +205,8 @@ export function ListServers():Promise<Array<main.ServerConnection>>;
 
 export function ListVPNEngines():Promise<Array<main.VPNEngineInfo>>;
 
+export function LoadCaptureImage(arg1:string):Promise<string>;
+
 export function MarkPullRequestReadyForReview(arg1:string,arg2:number):Promise<void>;
 
 export function MergeBranch(arg1:string,arg2:string):Promise<void>;
@@ -180,6 +214,8 @@ export function MergeBranch(arg1:string,arg2:string):Promise<void>;
 export function MergePullRequest(arg1:string,arg2:number,arg3:string):Promise<void>;
 
 export function Notify(arg1:string,arg2:string):Promise<void>;
+
+export function OpenCapture(arg1:string):Promise<void>;
 
 export function OpenContainerTerminal(arg1:string):Promise<string>;
 
@@ -199,6 +235,8 @@ export function OpenSystemVPNSettings():Promise<void>;
 
 export function PerformSelfUpdate(arg1:string):Promise<void>;
 
+export function PickCaptureFolder():Promise<string>;
+
 export function PickDocumentFolder():Promise<string>;
 
 export function PickDownloadFolder():Promise<string>;
@@ -209,7 +247,11 @@ export function PickKeyFile():Promise<string>;
 
 export function PickUploadFile():Promise<string>;
 
+export function PreviewDocument(arg1:string):Promise<void>;
+
 export function ProcessLogs(arg1:number):Promise<string>;
+
+export function ProductPreferences():Promise<main.ProductPreferences>;
 
 export function ProjectLogs(arg1:string):Promise<string>;
 
@@ -226,6 +268,8 @@ export function PullRequestFiles(arg1:string,arg2:number):Promise<Array<main.Pul
 export function PushBranch(arg1:string,arg2:string):Promise<void>;
 
 export function PushRepo(arg1:string):Promise<void>;
+
+export function PushTag(arg1:string,arg2:string):Promise<void>;
 
 export function QuitInstalledApp(arg1:string):Promise<void>;
 
@@ -251,6 +295,10 @@ export function RemoveServerCronLine(arg1:string,arg2:number):Promise<void>;
 
 export function RemoveServerVPNConfig(arg1:string):Promise<void>;
 
+export function RenameCapture(arg1:string,arg2:string):Promise<main.CapturesSnapshot>;
+
+export function RenameDocumentFolder(arg1:string,arg2:string):Promise<main.DocumentSnapshot>;
+
 export function ReopenPullRequest(arg1:string,arg2:number):Promise<void>;
 
 export function ReplyToReviewComment(arg1:string,arg2:number,arg3:number,arg4:string):Promise<void>;
@@ -266,6 +314,8 @@ export function RepoFiles(arg1:string,arg2:string):Promise<Array<main.RepoEntry>
 export function RepoGitHubOwner(arg1:string):Promise<string>;
 
 export function RepoGraph(arg1:string,arg2:number):Promise<Array<main.GraphCommit>>;
+
+export function RepoTags(arg1:string):Promise<Array<main.RepoTag>>;
 
 export function RequestReviewers(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
@@ -283,6 +333,10 @@ export function RestartContainer(arg1:string):Promise<void>;
 
 export function RestartServerContainer(arg1:string,arg2:string):Promise<void>;
 
+export function RestoreExcludedDocument(arg1:string):Promise<main.DocumentSnapshot>;
+
+export function RevealCapture(arg1:string):Promise<void>;
+
 export function RevealDocument(arg1:string):Promise<void>;
 
 export function RevealFileInFinder(arg1:string,arg2:string):Promise<void>;
@@ -297,6 +351,12 @@ export function RunServerCommand(arg1:string,arg2:string):Promise<string>;
 
 export function RunToolAction(arg1:string,arg2:string):Promise<string>;
 
+export function SaveEditedCapture(arg1:string,arg2:string):Promise<main.CapturesSnapshot>;
+
+export function SaveEditedCaptureAs(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SaveWorkspaceProfile(arg1:main.WorkspaceProfile):Promise<main.ProductPreferences>;
+
 export function ScanContainerImage(arg1:string):Promise<security.Report>;
 
 export function SearchBrewPackages(arg1:string):Promise<Array<main.BrewSearchResult>>;
@@ -305,17 +365,25 @@ export function SearchDocuments(arg1:string):Promise<Array<main.DocumentSearchHi
 
 export function SearchLanguagePackages(arg1:string,arg2:string):Promise<Array<main.RegistryPackage>>;
 
+export function SemanticSearchDocuments(arg1:string):Promise<Array<main.DocumentSearchHit>>;
+
 export function ServerContainerLogs(arg1:string,arg2:string):Promise<string>;
 
 export function ServerVPNStatus(arg1:string):Promise<main.VPNStatus>;
 
+export function SetCaptureFolder(arg1:string):Promise<main.CapturesSnapshot>;
+
 export function SetClipboardHistoryEnabled(arg1:boolean):Promise<void>;
+
+export function SetDocumentRootPolicy(arg1:string,arg2:main.DocumentRootPolicy):Promise<main.ProductPreferences>;
 
 export function SetGitHubClientID(arg1:string):Promise<void>;
 
 export function SetMineOnly(arg1:boolean):Promise<main.ActivitySummary>;
 
 export function SetNotificationSettings(arg1:main.NotificationSettings):Promise<void>;
+
+export function SetProjectExpectedState(arg1:string,arg2:string):Promise<main.ProductPreferences>;
 
 export function SetPullRequestLabels(arg1:string,arg2:number,arg3:Array<string>):Promise<void>;
 
@@ -376,6 +444,8 @@ export function UnstageFile(arg1:string,arg2:string):Promise<void>;
 export function UpdateServer(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:string,arg7:string,arg8:string):Promise<main.ServerConnection>;
 
 export function UploadServerFile(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function UseDedicatedCaptureFolder(arg1:boolean):Promise<main.CapturesSnapshot>;
 
 export function WriteContainerTerminal(arg1:string,arg2:string):Promise<void>;
 

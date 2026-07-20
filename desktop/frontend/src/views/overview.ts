@@ -6,10 +6,11 @@
 // app already loaded for the Runtime and Source Control views — no extra
 // backend call is made here, so Overview never triggers a second
 // Docker/process/git scan.
-import type { OverviewResult, ProjectGroup, Anomaly, Service, PortUsage, Job, ActivitySummary } from '../api'
-import { escapeHTML, getStatusClass } from '../dom'
+import type { OverviewResult, ProjectGroup, Anomaly, Service, PortUsage, Job, ActivitySummary, ProductPreferences } from '../api'
+import { escapeHTML, getStatusClass, showError } from '../dom'
 import { openServiceInspector } from '../components/serviceInspector'
 import { t } from '../i18n'
+import { api } from '../api'
 
 export interface OverviewContext {
   services: Service[]
@@ -18,7 +19,18 @@ export interface OverviewContext {
   activity: ActivitySummary | null
 }
 
+type OverviewProjectLayout = 'compact' | 'detailed'
+const OVERVIEW_PROJECT_LAYOUT_KEY = 'thaloca-overview-project-layout'
+let overviewProjectLayout: OverviewProjectLayout = localStorage.getItem(OVERVIEW_PROJECT_LAYOUT_KEY) === 'detailed' ? 'detailed' : 'compact'
+let productPreferences: ProductPreferences = { expected_projects: {}, workspaces: [], document_policies: {} }
+let preferencesLoaded = false
+let activeWorkspaceID = localStorage.getItem('thaloca-overview-workspace') || ''
+let lastOverviewData: OverviewResult | null = null
+let lastOverviewContext: OverviewContext | null = null
+
 export function renderOverviewView(data: OverviewResult | null, ctx: OverviewContext): void {
+  activeWorkspaceID = localStorage.getItem('thaloca-overview-workspace') || ''
+  lastOverviewData = data; lastOverviewContext = ctx
   const container = document.getElementById('overview-view')
   if (!container) return
 
@@ -27,20 +39,54 @@ export function renderOverviewView(data: OverviewResult | null, ctx: OverviewCon
     return
   }
 
-  const anomaliesHTML = data.anomalies.length
-    ? `<div class="anomaly-strip">${data.anomalies.map(renderAnomaly).join('')}</div>`
-    : `<div class="anomaly-strip empty-strip">${t('No active incidents — everything looks healthy.')}</div>`
-
-  const projects = sortProjectsByAttention(data.projects)
+  if (!preferencesLoaded) {
+    preferencesLoaded = true
+    void api.productPreferences().then(value => { productPreferences = value; if (lastOverviewData && lastOverviewContext) renderOverviewView(lastOverviewData, lastOverviewContext) })
+  }
+  const activeWorkspace = productPreferences.workspaces.find(profile => profile.id === activeWorkspaceID)
+  const scopedProjects = activeWorkspace ? data.projects.filter(project => activeWorkspace.projects.includes(project.name)) : data.projects
+  const projects = sortProjectsByAttention(scopedProjects)
+  const totalServices = data.projects.reduce((sum, project) => sum + project.total, 0)
+  const healthyServices = data.projects.reduce((sum, project) => sum + project.healthy, 0)
+  const downServices = data.projects.reduce((sum, project) => sum + project.down, 0)
+  const degradedServices = data.projects.reduce((sum, project) => sum + project.degraded, 0)
+  const dirtyRepos = ctx.activity?.repositories.filter(repo => !repo.ignored && (repo.changed_files > 0 || repo.staged_files > 0)).length || 0
+  const hasRuntimeIssues = downServices > 0 || degradedServices > 0 || data.anomalies.length > 0
+  const scannedAt = data.scanned_at ? new Date(data.scanned_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : t('just now')
 
   container.innerHTML = `
-    <p class="subview-desc">${t('Needs-attention projects first, then everything else — grouped live from Docker Compose, processes, and Git repositories. Nothing here is saved, it is rescanned on every refresh.')}</p>
-    <div class="overview-summary-row">
-      ${renderRuntimeSummary(ctx.services, ctx.ports, ctx.jobs)}
-      ${renderSourceSummary(ctx.activity)}
-    </div>
-    ${anomaliesHTML}
-    <div class="overview-grid">${projects.map(project => renderProjectCard(project, ctx.ports, ctx.jobs)).join('')}</div>
+    <section class="overview-command-center ${hasRuntimeIssues ? 'needs-attention' : 'healthy'}">
+      <div class="overview-command-copy">
+        <small>${t('Workspace status')} · ${t('Updated')} ${escapeHTML(scannedAt)}</small>
+        <h2>${hasRuntimeIssues ? t('Runtime needs attention') : t('Everything is running smoothly')}</h2>
+        <p>${hasRuntimeIssues ? t('Each number below has one source and one meaning.') : t('No incidents or unhealthy services detected. You can continue where you left off.')}</p>
+      </div>
+      <div class="overview-status-signals">
+        <button data-overview-nav="runtime" class="${downServices || degradedServices ? 'warning' : ''}"><strong>${healthyServices}/${totalServices}</strong><span>${t('services healthy')}</span>${downServices ? `<em>${downServices} ${t('down')}</em>` : degradedServices ? `<em>${degradedServices} ${t('degraded')}</em>` : ''}</button>
+        <button data-overview-nav="incidents" class="${data.anomalies.length ? 'warning' : ''}"><strong>${data.anomalies.length}</strong><span>${t('incidents')}</span></button>
+        <button data-overview-nav="source" class="${ctx.activity?.behind ? 'warning' : ''}"><strong>${dirtyRepos}</strong><span>${t('repositories changed')}</span>${ctx.activity?.behind ? `<em>${ctx.activity.behind} ${t('commits behind')}</em>` : ''}</button>
+      </div>
+    </section>
+
+    <section class="overview-workspace-tabs" aria-label="${t('Workspace shortcuts')}">
+      <span>${t('Workspace')}</span>
+      ${renderWorkspaceTab('source', 'Source Control', dirtyRepos ? `${dirtyRepos} ${t('changed')}` : t('Clean'))}
+      ${renderWorkspaceTab('documents', 'Documents', t('Search'))}
+      ${renderWorkspaceTab('captures', 'Captures', t('Recent'))}
+      ${renderWorkspaceTab('runtime', 'Runtime', `${ctx.services.length} ${t('services')}`)}
+      ${renderWorkspaceTab('incidents', 'Incidents', data.anomalies.length ? `${data.anomalies.length}` : t('All clear'))}
+    </section>
+
+    <section class="overview-panel overview-attention-panel">
+      <header><div><small>${t('Priority')}</small><h3>${t('Needs your attention')}</h3></div>${data.anomalies.length ? `<button data-overview-nav="incidents">${t('Open incidents')} →</button>` : ''}</header>
+      ${data.anomalies.length ? `<div class="anomaly-strip">${data.anomalies.map(renderAnomaly).join('')}</div>` : `<div class="overview-clear-state"><span>✓</span><div><strong>${t('Nothing urgent')}</strong><p>${t('Thaloca did not detect restart loops, degraded services, or log errors.')}</p></div></div>`}
+    </section>
+
+    <section class="overview-projects-section">
+      <header><div><small>${t('Workspace')}</small><h3>${t('Projects')}</h3></div><div class="overview-project-controls"><span>${projects.length} ${t(projects.length === 1 ? 'project' : 'projects')}</span><div role="group" aria-label="${t('Project display')}"><button data-overview-layout="compact" class="${overviewProjectLayout === 'compact' ? 'active' : ''}">${t('Compact')}</button><button data-overview-layout="detailed" class="${overviewProjectLayout === 'detailed' ? 'active' : ''}">${t('Detailed')}</button></div></div></header>
+      <div class="overview-profile-bar"><button data-overview-workspace="" class="${!activeWorkspace ? 'active' : ''}">${t('All projects')}</button>${productPreferences.workspaces.map(profile => `<span class="overview-profile-pill"><button data-overview-workspace="${escapeHTML(profile.id)}" class="${activeWorkspaceID === profile.id ? 'active' : ''}">${escapeHTML(profile.name)} <small>${profile.projects.length}</small></button>${activeWorkspaceID === profile.id ? `<button data-delete-workspace="${escapeHTML(profile.id)}" title="${t('Delete workspace')}">×</button>` : ''}</span>`).join('')}<details><summary>+ ${t('Custom workspace')}</summary><form id="overview-workspace-form"><input name="name" placeholder="${t('Workspace name')}" required>${data.projects.map(project => `<label><input type="checkbox" name="project" value="${escapeHTML(project.name)}"> ${escapeHTML(project.name)}</label>`).join('')}<button type="submit" class="btn-secondary">${t('Save workspace')}</button></form></details></div>
+      <div class="overview-grid overview-grid-${overviewProjectLayout}">${projects.map(project => renderProjectCard(project, ctx.ports, ctx.jobs, overviewProjectLayout)).join('')}</div>
+    </section>
   `
 
   container.querySelectorAll<HTMLElement>('[data-overview-service]').forEach(el => {
@@ -56,36 +102,51 @@ export function renderOverviewView(data: OverviewResult | null, ctx: OverviewCon
       renderOverviewView(data, ctx)
     })
   })
+  container.querySelectorAll<HTMLElement>('[data-overview-nav]').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelector<HTMLButtonElement>(`.nav-btn[data-view="${CSS.escape(el.dataset.overviewNav || '')}"]`)?.click()
+    })
+  })
+  container.querySelectorAll<HTMLButtonElement>('[data-overview-layout]').forEach(button => {
+    button.addEventListener('click', () => {
+      overviewProjectLayout = button.dataset.overviewLayout === 'detailed' ? 'detailed' : 'compact'
+      localStorage.setItem(OVERVIEW_PROJECT_LAYOUT_KEY, overviewProjectLayout)
+      renderOverviewView(data, ctx)
+    })
+  })
+  container.querySelectorAll<HTMLSelectElement>('[data-overview-expected]').forEach(select => {
+    select.addEventListener('change', () => {
+      select.disabled = true
+      void api.setProjectExpectedState(select.dataset.overviewExpected || '', select.value)
+        .then(() => document.dispatchEvent(new CustomEvent('thaloca:refresh')))
+        .catch(error => showError(String(error)))
+        .finally(() => { select.disabled = false })
+    })
+  })
+  container.querySelectorAll<HTMLButtonElement>('[data-overview-workspace]').forEach(button => button.addEventListener('click', () => {
+    activeWorkspaceID = button.dataset.overviewWorkspace || ''
+    localStorage.setItem('thaloca-overview-workspace', activeWorkspaceID)
+    renderOverviewView(data, ctx)
+  }))
+  container.querySelector<HTMLFormElement>('#overview-workspace-form')?.addEventListener('submit', event => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget as HTMLFormElement)
+    const name = String(form.get('name') || '').trim()
+    const projects = form.getAll('project').map(String)
+    if (!name || !projects.length) return
+    void api.saveWorkspaceProfile({ id: '', name, projects })
+      .then(value => { productPreferences = value; renderOverviewView(data, ctx) })
+      .catch(error => showError(String(error)))
+  })
+  container.querySelectorAll<HTMLButtonElement>('[data-delete-workspace]').forEach(button => button.addEventListener('click', () => {
+    void api.deleteWorkspaceProfile(button.dataset.deleteWorkspace || '')
+      .then(value => { productPreferences = value; activeWorkspaceID = ''; localStorage.removeItem('thaloca-overview-workspace'); renderOverviewView(data, ctx) })
+      .catch(error => showError(String(error)))
+  }))
 }
 
-function renderRuntimeSummary(services: Service[], ports: PortUsage[], jobs: Job[]): string {
-  const dockerAll = services.filter(s => s.source === 'docker')
-  const running = dockerAll.filter(s => s.status !== 'stopped').length
-  const processes = services.filter(s => s.source === 'process').length
-  return `
-    <article class="overview-summary-card">
-      <span class="overview-summary-title">${t('Runtime')}</span>
-      <p>${running}/${dockerAll.length} ${t('containers')} · ${processes} ${t('processes')} · ${ports.length} ${t(ports.length === 1 ? 'port' : 'ports')} · ${jobs.length} ${t(jobs.length === 1 ? 'job' : 'jobs')}</p>
-    </article>`
-}
-
-function renderSourceSummary(activity: ActivitySummary | null): string {
-  if (!activity) {
-    return `
-      <article class="overview-summary-card">
-        <span class="overview-summary-title">${t('Source Control')}</span>
-        <p>${t('Loading git activity…')}</p>
-      </article>`
-  }
-  const dirty = activity.repositories.filter(r => !r.ignored && (r.changed_files > 0 || r.staged_files > 0)).length
-  const parts = [`${dirty} ${t(dirty === 1 ? 'repository' : 'repositories')} ${t('changed')}`]
-  if (activity.ahead) parts.push(`${activity.ahead} ${t('ahead')}`)
-  if (activity.behind) parts.push(`${activity.behind} ${t('behind')}`)
-  return `
-    <article class="overview-summary-card">
-      <span class="overview-summary-title">${t('Source Control')}</span>
-      <p>${parts.join(' · ')}</p>
-    </article>`
+function renderWorkspaceTab(view: string, label: string, detail: string): string {
+  return `<button data-overview-nav="${view}"><strong>${t(label)}</strong><small>${escapeHTML(detail)}</small></button>`
 }
 
 function findService(projects: ProjectGroup[], id: string): Service | undefined {
@@ -150,26 +211,32 @@ function sortProjectsByAttention(projects: ProjectGroup[]): ProjectGroup[] {
   return [...projects].sort((a, b) => rank(a) - rank(b))
 }
 
-function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs: Job[]): string {
+function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs: Job[], layout: OverviewProjectLayout): string {
   const expanded = expandedOverviewProjects.has(project.name)
-  const visible = expanded ? project.services : project.services.slice(0, 4)
+  const visible = layout === 'compact' && !expanded ? [] : expanded ? project.services : project.services.slice(0, 4)
   const hiddenCount = project.services.length - visible.length
-  const overall = project.total > 0 && project.healthy === project.total ? 'healthy' : project.down > 0 ? 'critical' : 'warning'
+  const optional = project.expected_state === 'on_demand' || project.expected_state === 'muted'
+  const overall = optional ? 'optional' : project.total > 0 && project.healthy === project.total ? 'healthy' : project.down > 0 ? 'critical' : 'warning'
   const portCount = allPorts.filter(p => projectOrUnassigned(p.project) === project.name).length
   const jobCount = allJobs.filter(j => projectOrUnassigned(j.project) === project.name).length
   return `
-    <article class="overview-card overview-card-${overall}">
+    <article class="overview-card overview-card-${overall} ${layout === 'compact' ? 'overview-card-compact' : ''} ${expanded ? 'expanded' : ''}">
       <header>
-        <strong>${escapeHTML(project.name === 'Unassigned' ? t('Unassigned') : project.name)}</strong>
+        <strong title="${escapeHTML(project.name === 'Unassigned' ? t('Unassigned') : project.name)}">${escapeHTML(project.name === 'Unassigned' ? t('Unassigned') : project.name)}</strong>
         <div class="overview-card-header-actions">
           <span class="overview-badge">${project.healthy}/${project.total} ${t('healthy')}</span>
+          <select class="overview-expected-select" data-overview-expected="${escapeHTML(project.name)}" title="${t('Expected state')}">
+            <option value="required" ${(!project.expected_state || project.expected_state === 'required') ? 'selected' : ''}>${t('Must run')}</option>
+            <option value="on_demand" ${project.expected_state === 'on_demand' ? 'selected' : ''}>${t('On demand')}</option>
+            <option value="muted" ${project.expected_state === 'muted' ? 'selected' : ''}>${t('Muted')}</option>
+          </select>
           <button class="repo-action" data-overview-goto-runtime="${escapeHTML(project.name)}" title="${t('View this group in Runtime')}">${t('Runtime')} →</button>
         </div>
       </header>
       ${project.degraded || project.down || portCount || jobCount ? `
         <div class="overview-summary">
           ${project.degraded ? `<span class="chip warning">${project.degraded} ${t('degraded')}</span>` : ''}
-          ${project.down ? `<span class="chip critical">${project.down} ${t('down')}</span>` : ''}
+          ${project.down ? `<span class="chip critical">${project.down} ${t('stopped')}</span>` : ''}
           ${portCount ? `<span class="chip">${portCount} ${t(portCount === 1 ? 'port' : 'ports')}</span>` : ''}
           ${jobCount ? `<span class="chip">${jobCount} ${t(jobCount === 1 ? 'job' : 'jobs')}</span>` : ''}
         </div>` : ''}
@@ -180,10 +247,12 @@ function renderProjectCard(project: ProjectGroup, allPorts: PortUsage[], allJobs
             <span class="overview-service-name">${escapeHTML(s.name)}</span>
             <span class="overview-service-ports">${(s.ports || []).map(p => ':' + p).join(' ')}</span>
           </button>`).join('')}
-        ${hiddenCount > 0
+        ${layout === 'compact' && !expanded
+          ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">${project.services.length} ${t('services')} · ${t('Show services')} ↓</button>`
+          : hiddenCount > 0
           ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">+${hiddenCount} ${t('more')}</button>`
           : expanded && project.services.length > 4
-            ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">${t('Show less')}</button>`
+            ? `<button class="overview-more" data-overview-more="${escapeHTML(project.name)}">${t('Collapse')} ↑</button>`
             : ''}
       </div>
     </article>`

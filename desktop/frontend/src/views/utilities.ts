@@ -12,10 +12,11 @@
 // touches any other view's state. main.ts only needs to call
 // initUtilitiesView() once, the first time this subtab is opened.
 import { copyToClipboard } from '../clipboard'
-import { escapeHTML } from '../dom'
+import { escapeHTML, formatBytes } from '../dom'
 import { getTheme } from '../theme'
 import QRCode from 'qrcode'
-import mermaid from 'mermaid'
+
+type MermaidAPI = typeof import('mermaid')['default']
 
 interface UtilityTool {
   id: string
@@ -84,7 +85,7 @@ function selectTool(id: string): void {
   const tool = tools.find(t => t.id === id)
   if (!tool) return
   const opensModal = modalToolCategories.has(tool.category)
-  detail.querySelector<HTMLElement>('.markdown-workspace, .utility-tool-modal')?.dispatchEvent(new Event('utility:dispose'))
+  detail.querySelector<HTMLElement>('.markdown-workspace, .utility-tool-modal, .utility-tool-disposable')?.dispatchEvent(new Event('utility:dispose'))
   detail.classList.toggle('utilities-detail--markdown', id === 'markdown-preview')
   detail.classList.toggle('utilities-detail--modal-tool', opensModal && id !== 'markdown-preview')
   detail.innerHTML = ''
@@ -773,7 +774,17 @@ function markdownToHTML(md: string): string {
 // theme choice without adding a live theme-change listener for this one
 // case).
 let mermaidTheme = ''
-function ensureMermaidInitialized(mode: 'light' | 'dark' = getTheme()): void {
+let mermaidPromise: Promise<MermaidAPI> | null = null
+
+function loadMermaid(): Promise<MermaidAPI> {
+  // Mermaid is by far the largest Utilities dependency. Loading it only
+  // when a Markdown document actually contains a Mermaid fence keeps both
+  // normal Utilities use and plain Markdown previews lightweight.
+  mermaidPromise ??= import('mermaid').then(module => module.default)
+  return mermaidPromise
+}
+
+function ensureMermaidInitialized(mermaid: MermaidAPI, mode: 'light' | 'dark' = getTheme()): void {
   const nextTheme = mode === 'light' ? 'default' : 'dark'
   if (mermaidTheme === nextTheme) return
   mermaidTheme = nextTheme
@@ -966,7 +977,9 @@ console.log(message)
     if (diagrams.length) {
       setStat('mermaid', '● Rendering Mermaid')
       try {
-        ensureMermaidInitialized(workspace.dataset.previewMode as 'light' | 'dark')
+        const mermaid = await loadMermaid()
+        if (sequence !== renderSequence) return
+        ensureMermaidInitialized(mermaid, workspace.dataset.previewMode as 'light' | 'dark')
         await mermaid.run({ nodes: Array.from(diagrams) })
         if (sequence === renderSequence) {
           setupMermaidControls()
@@ -1851,6 +1864,209 @@ async function inspectCertOrCSR(pem: string): Promise<string> {
   ].join('\n')
 }
 
+// ---- Image resize (canvas-based, fully client-side) -----------------------
+
+// canvas.toBlob can only encode these three; anything else (GIF, TIFF, SVG,
+// AVIF...) still loads and resizes fine but is written back out as PNG.
+const IMAGE_RESIZE_OUTPUT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+
+// An unbounded width/height would let a canvas allocation request tens of
+// GB of memory and hang the WebView — these caps are generous for any real
+// photo/screenshot use case while still being finite.
+const IMAGE_RESIZE_MAX_DIMENSION = 8000
+const IMAGE_RESIZE_MAX_MEGAPIXELS = 40_000_000
+
+function mountImageResize(container: HTMLElement): void {
+  const wrap = document.createElement('div')
+  // utility-tool-disposable: this tool (unlike the modal-wrapped ones)
+  // renders straight into the detail panel, but still holds object URLs
+  // that need revoking when the user switches away — see the
+  // utility:dispose listener below and its dispatch in selectTool().
+  wrap.className = 'utility-io-panel utility-tool-disposable'
+  wrap.innerHTML = `
+    <div class="utility-image-drop">
+      <input class="utility-image-file" type="file" accept="image/*" hidden>
+      <span>Drop an image here, or</span>
+      <button class="btn-secondary utility-image-pick" type="button">Choose image</button>
+    </div>
+    <div class="utility-image-controls" hidden>
+      <p class="resource-detail utility-image-info"></p>
+      <div class="utility-image-size-row">
+        <label class="utility-field"><span>Width (px)</span><input class="search-input utility-image-width" type="number" min="1"></label>
+        <label class="utility-field"><span>Height (px)</span><input class="search-input utility-image-height" type="number" min="1"></label>
+        <label class="utility-image-ratio-lock"><input class="utility-image-ratio" type="checkbox" checked> Lock aspect ratio</label>
+      </div>
+      <div class="security-toolbar utility-image-presets">
+        <button class="btn-secondary" type="button" data-image-scale="0.25">25%</button>
+        <button class="btn-secondary" type="button" data-image-scale="0.5">50%</button>
+        <button class="btn-secondary" type="button" data-image-scale="0.75">75%</button>
+        <button class="btn-secondary" type="button" data-image-scale="1">100%</button>
+        <button class="btn-primary utility-image-resize-btn" type="button">Resize</button>
+      </div>
+      <div class="utility-image-preview" hidden>
+        <img class="utility-image-result" alt="Resized preview">
+        <p class="resource-detail utility-image-result-info"></p>
+        <div class="security-toolbar"><a class="btn-primary utility-image-download" download>Download</a></div>
+      </div>
+    </div>
+    <p class="resource-detail tool-action-failed utility-error" style="display:none"></p>`
+  container.appendChild(wrap)
+
+  const drop = wrap.querySelector<HTMLElement>('.utility-image-drop')!
+  const fileInput = wrap.querySelector<HTMLInputElement>('.utility-image-file')!
+  const controls = wrap.querySelector<HTMLElement>('.utility-image-controls')!
+  const info = wrap.querySelector<HTMLElement>('.utility-image-info')!
+  const widthInput = wrap.querySelector<HTMLInputElement>('.utility-image-width')!
+  const heightInput = wrap.querySelector<HTMLInputElement>('.utility-image-height')!
+  const ratioLock = wrap.querySelector<HTMLInputElement>('.utility-image-ratio')!
+  const preview = wrap.querySelector<HTMLElement>('.utility-image-preview')!
+  const resultImg = wrap.querySelector<HTMLImageElement>('.utility-image-result')!
+  const resultInfo = wrap.querySelector<HTMLElement>('.utility-image-result-info')!
+  const downloadLink = wrap.querySelector<HTMLAnchorElement>('.utility-image-download')!
+  const errorEl = wrap.querySelector<HTMLElement>('.utility-error')!
+
+  let image: HTMLImageElement | null = null
+  let sourceName = ''
+  let sourceType = ''
+  let sourceURL = ''
+  let resultURL = ''
+  let disposed = false
+
+  const showError = (message: string) => { errorEl.textContent = message; errorEl.style.display = 'block' }
+  const clearError = () => { errorEl.style.display = 'none' }
+  const releaseResultURL = () => {
+    if (resultURL) { URL.revokeObjectURL(resultURL); resultURL = '' }
+  }
+  const releaseSourceURL = () => {
+    if (sourceURL) { URL.revokeObjectURL(sourceURL); sourceURL = '' }
+  }
+
+  const loadFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      showError(`"${file.name}" is not an image.`)
+      return
+    }
+    // Revoke whatever the previously loaded image was holding — otherwise
+    // picking several images in a row (or dropping a new one) leaks one
+    // object URL per pick for as long as this view stays mounted.
+    releaseSourceURL()
+    const url = URL.createObjectURL(file)
+    sourceURL = url
+    const img = new Image()
+    img.onload = () => {
+      image = img
+      sourceName = file.name
+      sourceType = file.type
+      info.textContent = `${file.name} — ${img.naturalWidth} × ${img.naturalHeight} px · ${formatBytes(file.size)}`
+      widthInput.value = String(img.naturalWidth)
+      heightInput.value = String(img.naturalHeight)
+      controls.hidden = false
+      preview.hidden = true
+      releaseResultURL()
+      clearError()
+    }
+    img.onerror = () => {
+      releaseSourceURL()
+      showError(`Could not load "${file.name}" as an image.`)
+    }
+    img.src = url
+  }
+
+  // Runs when the user switches to a different utility (see the
+  // utility:dispose dispatch in selectTool()) — without this, an image
+  // left loaded here would hold its object URL(s) alive indefinitely.
+  wrap.addEventListener('utility:dispose', () => {
+    disposed = true
+    releaseSourceURL()
+    releaseResultURL()
+  }, { once: true })
+
+  drop.querySelector('.utility-image-pick')!.addEventListener('click', () => fileInput.click())
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files?.[0]) loadFile(fileInput.files[0])
+    fileInput.value = '' // allow re-picking the same file
+  })
+  drop.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('dragover') })
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'))
+  drop.addEventListener('drop', event => {
+    event.preventDefault()
+    drop.classList.remove('dragover')
+    const file = event.dataTransfer?.files?.[0]
+    if (file) loadFile(file)
+  })
+
+  const syncFromWidth = () => {
+    if (!image || !ratioLock.checked) return
+    const w = Number(widthInput.value)
+    if (w > 0) heightInput.value = String(Math.max(1, Math.round(w * image.naturalHeight / image.naturalWidth)))
+  }
+  const syncFromHeight = () => {
+    if (!image || !ratioLock.checked) return
+    const h = Number(heightInput.value)
+    if (h > 0) widthInput.value = String(Math.max(1, Math.round(h * image.naturalWidth / image.naturalHeight)))
+  }
+  widthInput.addEventListener('input', syncFromWidth)
+  heightInput.addEventListener('input', syncFromHeight)
+
+  wrap.querySelectorAll<HTMLButtonElement>('[data-image-scale]').forEach(button => {
+    button.addEventListener('click', () => {
+      if (!image) return
+      const scale = Number(button.dataset.imageScale)
+      widthInput.value = String(Math.max(1, Math.round(image.naturalWidth * scale)))
+      heightInput.value = String(Math.max(1, Math.round(image.naturalHeight * scale)))
+    })
+  })
+
+  wrap.querySelector('.utility-image-resize-btn')!.addEventListener('click', () => {
+    if (!image) return
+    const width = Math.floor(Number(widthInput.value))
+    const height = Math.floor(Number(heightInput.value))
+    if (!(width > 0) || !(height > 0)) {
+      showError('Width and height must be positive numbers.')
+      return
+    }
+    if (width > IMAGE_RESIZE_MAX_DIMENSION || height > IMAGE_RESIZE_MAX_DIMENSION) {
+      showError(`Width and height can't exceed ${IMAGE_RESIZE_MAX_DIMENSION}px.`)
+      return
+    }
+    if (width * height > IMAGE_RESIZE_MAX_MEGAPIXELS) {
+      showError(`That's ${(width * height / 1_000_000).toFixed(0)} megapixels — Thaloca caps resizing at ${IMAGE_RESIZE_MAX_MEGAPIXELS / 1_000_000}MP to avoid hanging on a huge canvas.`)
+      return
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      showError('Canvas is not available.')
+      return
+    }
+    ctx.drawImage(image, 0, 0, width, height)
+    const outputType = IMAGE_RESIZE_OUTPUT_TYPES.has(sourceType) ? sourceType : 'image/png'
+    canvas.toBlob(blob => {
+      // canvas.toBlob is async — the user may have already switched to a
+      // different utility (which disposes and revokes everything above)
+      // before this fires. Bail out rather than creating a new object URL
+      // that dispose already ran and will now never revoke.
+      if (disposed) return
+      if (!blob) {
+        showError('Could not encode the resized image.')
+        return
+      }
+      releaseResultURL()
+      resultURL = URL.createObjectURL(blob)
+      resultImg.src = resultURL
+      resultInfo.textContent = `${width} × ${height} px · ${formatBytes(blob.size)}`
+      const base = sourceName.replace(/\.[^.]+$/, '') || 'image'
+      const ext = outputType === 'image/jpeg' ? 'jpg' : outputType.slice('image/'.length)
+      downloadLink.href = resultURL
+      downloadLink.download = `${base}-${width}x${height}.${ext}`
+      preview.hidden = false
+      clearError()
+    }, outputType)
+  })
+}
+
 // ---- Tool registry -------------------------------------------------------
 
 const tools: UtilityTool[] = [
@@ -2027,6 +2243,8 @@ const tools: UtilityTool[] = [
       placeholder: '192.168.1.10/24', transform: calculateCIDR, liveUpdate: true,
     })
   } },
+
+  { id: 'image-resize', name: 'Image Resize', category: 'Images', mount: mountImageResize },
 
   { id: 'env-compare', name: '.env Compare', category: 'Data formats', mount: c => {
     buildTwoInputPanel(c, {

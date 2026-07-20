@@ -45,3 +45,19 @@ func TestMemoryLeakHeuristicCatchesSustainedClimb(t *testing.T) {
 		t.Fatalf("expected a genuinely sustained climb to trip the threshold (first=%.1f second=%.1f)", firstAvg, secondAvg)
 	}
 }
+
+func TestLocalPressureOnlyTriggersOnTransition(t *testing.T) {
+	app := &App{}
+	if !app.localPressureBecameHigh("RAM", true) {
+		t.Fatal("first high sample should trigger")
+	}
+	if app.localPressureBecameHigh("RAM", true) {
+		t.Fatal("ongoing high samples must not trigger repeatedly")
+	}
+	if app.localPressureBecameHigh("RAM", false) {
+		t.Fatal("recovery should only reset state")
+	}
+	if !app.localPressureBecameHigh("RAM", true) {
+		t.Fatal("a new high transition after recovery should trigger")
+	}
+}

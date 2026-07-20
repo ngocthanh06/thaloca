@@ -4,6 +4,7 @@
 import { api, type UpdateInfo } from '../api'
 import { escapeHTML, showError } from '../dom'
 import { getPinnedRepos, setPinnedRepos } from '../views/sourceControl'
+import { SHORTCUT_TARGETS, getShortcuts, setShortcut, setShortcuts, comboFromEvent, formatCombo } from '../keyboardShortcuts'
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { getLocale, setLocale, t, type Locale } from '../i18n'
 
@@ -24,6 +25,9 @@ let checkingForUpdate = false
 let selfUpdating = false
 let selfUpdateError = ''
 let clipboardHistoryEnabled = true
+// Which shortcut field is currently listening for a key combo, if any —
+// see renderShortcutRow/bindShortcutRows below.
+let recordingShortcutId: string | null = null
 
 export function initSettingsPanel(): void {
   if (document.getElementById('settings-root')) return
@@ -77,6 +81,13 @@ function render(): void {
         </div>
       </section>
       <section class="settings-section">
+        <h3>${t('Keyboard shortcuts')}</h3>
+        <p class="resource-detail muted">${t('Click a field and press a key combination to jump straight to that tab.')}</p>
+        <div class="settings-shortcuts">
+          ${SHORTCUT_TARGETS.map(target => renderShortcutFieldRow(target.id, target.label, getShortcuts()[target.id])).join('')}
+        </div>
+      </section>
+      <section class="settings-section">
         <h3>${t('Language')}</h3>
         <div class="settings-buttons">
           <button class="btn-secondary${getLocale() === 'en' ? ' settings-lang-active' : ''}" data-settings-lang="en">English</button>
@@ -90,7 +101,7 @@ function render(): void {
       </section>
       <section class="settings-section">
         <h3>${t('Backup')}</h3>
-        <p class="resource-detail muted">${t("Export or import servers, ignored/pinned repos, and notification settings — useful when moving to a new machine. Server entries only ever contain a key file path, never the key's contents.")}</p>
+        <p class="resource-detail muted">${t("Export or import servers, ignored/pinned repos, keyboard shortcuts, and notification settings — useful when moving to a new machine. Server entries only ever contain a key file path, never the key's contents.")}</p>
         <div class="settings-buttons">
           <button class="btn-secondary" data-settings-export>${t('Export config…')}</button>
           <button class="btn-secondary" data-settings-import>${t('Import config…')}</button>
@@ -107,6 +118,7 @@ function render(): void {
     </div>`
 
   root.querySelector('[data-settings-close]')?.addEventListener('click', closeSettingsPanel)
+  bindShortcutRows(root)
   root.querySelectorAll<HTMLInputElement>('[data-setting]').forEach(input => {
     input.addEventListener('change', () => handleSettingChange(input))
   })
@@ -126,6 +138,52 @@ function render(): void {
     if (updateCheck?.release_url) BrowserOpenURL(updateCheck.release_url)
   })
   root.querySelector('[data-settings-self-update]')?.addEventListener('click', () => void handleSelfUpdate())
+}
+
+function renderShortcutFieldRow(id: string, label: string, combo: string | undefined): string {
+  const recording = recordingShortcutId === id
+  return `
+    <div class="settings-shortcut-row">
+      <span>${escapeHTML(t(label))}</span>
+      <button type="button" class="shortcut-field${recording ? ' recording' : ''}" data-shortcut-field="${id}">${recording ? t('Press keys…') : (combo ? escapeHTML(formatCombo(combo)) : t('Click to set'))}</button>
+      <button type="button" class="shortcut-clear" data-shortcut-clear="${id}" title="${t('Clear')}" ${combo ? '' : 'disabled'}>×</button>
+    </div>`
+}
+
+// The field itself is a plain button (not a text input) so a pressed key
+// never types into it — clicking starts "recording", and the very next
+// keydown on that button is read as the combo to bind (Escape cancels).
+// Every row shares this same recording flow and persists to localStorage.
+function bindShortcutRows(root: HTMLElement): void {
+  root.querySelectorAll<HTMLButtonElement>('[data-shortcut-field]').forEach(field => {
+    const id = field.dataset.shortcutField!
+    field.addEventListener('click', () => {
+      recordingShortcutId = id
+      render()
+      root.querySelector<HTMLButtonElement>(`[data-shortcut-field="${id}"]`)?.focus()
+    })
+    field.addEventListener('keydown', event => {
+      if (recordingShortcutId !== id) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === 'Escape') { recordingShortcutId = null; render(); return }
+      const combo = comboFromEvent(event)
+      if (!combo) return
+      recordingShortcutId = null
+      setShortcut(id, combo)
+      render()
+    })
+    field.addEventListener('blur', () => {
+      if (recordingShortcutId === id) { recordingShortcutId = null; render() }
+    })
+  })
+  root.querySelectorAll<HTMLButtonElement>('[data-shortcut-clear]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.shortcutClear!
+      setShortcut(id, null)
+      render()
+    })
+  })
 }
 
 function renderUpdateResult(): string {
@@ -202,7 +260,7 @@ async function handleSettingChange(input: HTMLInputElement): Promise<void> {
 
 async function handleExport(): Promise<void> {
   try {
-    const path = await api.exportConfig(getPinnedRepos())
+    const path = await api.exportConfig(getPinnedRepos(), getShortcuts())
     if (path) void api.notify(t('Config exported'), path)
   } catch (error) {
     showError(`${t('Could not export config:')} ${String(error)}`)
@@ -210,11 +268,12 @@ async function handleExport(): Promise<void> {
 }
 
 async function handleImport(): Promise<void> {
-  if (!(await api.confirmDialog(t('Import config'), t("This replaces your current saved servers, ignored/pinned repos, and notification settings with what's in the chosen file. Continue?")))) return
+  if (!(await api.confirmDialog(t('Import config'), t("This replaces your current saved servers, ignored/pinned repos, keyboard shortcuts, and notification settings with what's in the chosen file. Continue?")))) return
   try {
     const backup = await api.importConfig()
     if (!backup || !backup.exported_at) return // cancelled
     if (backup.pinned_repos) setPinnedRepos(backup.pinned_repos)
+    if (backup.keyboard_shortcuts) setShortcuts(backup.keyboard_shortcuts)
     current = { ...current, ...backup.notification_settings }
     render()
     void api.notify(t('Config imported'), t('Reopen Servers / Source Control to see the restored data.'))

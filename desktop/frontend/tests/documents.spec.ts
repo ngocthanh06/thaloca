@@ -21,40 +21,79 @@ test('requires LongBrain and exposes its install link', async ({ page }) => {
   await expect(page.getByText('curl -fsSL https://raw.githubusercontent.com/ngocthanh06/longbrain/main/install.sh | bash')).toBeVisible()
   await expect(page.locator('#document-query')).toBeDisabled()
   await expect(page.locator('#document-search-form button[type="submit"]')).toBeDisabled()
-  await expect(page.locator('#document-ask')).toBeDisabled()
+  await expect(page.locator('#document-answer-results')).toHaveCount(0)
   await expect(page.locator('#document-add-folder')).toBeDisabled()
   await expect(page.locator('#document-refresh')).toBeDisabled()
   await expect(page.locator('#document-install-longbrain')).toBeVisible()
 })
 
-test('keeps local search enabled but blocks Ask AI for Gemini', async ({ page }) => {
+test('keeps search available but defers Answer from passages to a later phase', async ({ page }) => {
   await installMockApp(page)
   await page.addInitScript(snapshot => {
     ;(window as any).__documentSnapshot = { ...snapshot, longbrain: { ...snapshot.longbrain, llm_provider: 'gemini', llm_model: 'models/gemini-2.5-flash', llm_local: false } }
+    ;(window as any).__documentHits = [{ document_id: 'd1', path: '/docs/plan.md', file_name: 'plan.md', file_type: 'md', chunk_index: 0, text: 'Local search result.', score: .9 }]
   }, connectedSnapshot)
   await openDocuments(page)
-  await expect(page.getByText('Local search ready · Ask AI blocked')).toBeVisible()
-  await expect(page.getByText('gemini / models/gemini-2.5-flash')).toBeVisible()
   await expect(page.locator('#document-query')).toBeEnabled()
   await expect(page.locator('#document-search-form button[type="submit"]')).toBeEnabled()
-  await expect(page.locator('#document-ask')).toBeDisabled()
+  await page.locator('#document-query').fill('local result')
+  await page.locator('#document-search-form button[type="submit"]').click()
+  await expect(page.locator('#document-answer-results')).toBeDisabled()
+  await expect(page.locator('#document-answer-results')).toHaveAttribute('title', 'Planned for a later phase')
   await expect(page.locator('#document-add-folder')).toBeEnabled()
   await expect(page.locator('#document-refresh')).toBeEnabled()
+})
+
+test('managed folder can be given a friendly name without changing its path', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => { ;(window as any).__documentSnapshot = snapshot }, connectedSnapshot)
+  await openDocuments(page)
+  await expect(page.locator('.document-root-copy strong')).toHaveText('docs')
+  await page.locator('[data-document-rename-root="/docs"]').click()
+  const input = page.locator('[data-document-root-name="/docs"]')
+  await expect(input).toBeFocused()
+  await input.fill('Tài liệu dự án chính')
+  await page.locator('.document-root-rename button[type="submit"]').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.find((call: any) => call.name === 'RenameDocumentFolder'))).toEqual({ name: 'RenameDocumentFolder', args: ['/docs', 'Tài liệu dự án chính'] })
+  await expect(page.locator('.document-root-copy strong')).toHaveText('Tài liệu dự án chính')
+  await expect(page.locator('.document-root-copy small')).toHaveText('/docs')
+  await page.getByText('Index settings', { exact: true }).click()
+  await expect(page.locator('.document-root-policy form')).toBeVisible()
+  await expect(page.locator('.document-root-policy select')).toHaveCSS('appearance', 'none')
 })
 
 test('semantic result shows citation and opens the managed file', async ({ page }) => {
   await installMockApp(page)
   await page.addInitScript(snapshot => {
     ;(window as any).__documentSnapshot = snapshot
-    ;(window as any).__documentHits = [{ document_id: 'd1', path: '/docs/plan.md', file_name: 'plan.md', file_type: 'md', chunk_index: 0, line_start: 7, line_end: 9, text: 'The release is scheduled for Friday.', score: .91 }]
+    ;(window as any).__documentHits = [{ document_id: 'd1', path: '/docs/releases/release-date-plan.md', file_name: 'release-date-plan.md', file_type: 'md', chunk_index: 0, line_start: 7, line_end: 9, text: 'The release date is scheduled for Friday.', score: .91 }]
   }, connectedSnapshot)
   await openDocuments(page)
   await page.locator('#document-query').fill('release date')
   await page.locator('#document-search-form button[type="submit"]').click()
-  await expect(page.getByText('The release is scheduled for Friday.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Lines 7–9' })).toBeVisible()
-  await page.getByRole('button', { name: 'Lines 7–9' }).click()
+  await expect(page.getByText('The release date is scheduled for Friday.')).toBeVisible()
+  await expect(page.locator('.document-result-file strong mark')).toHaveCount(2)
+  await expect(page.locator('.document-result-file small mark')).toHaveCount(1)
+  await expect(page.locator('.document-result-snippet mark')).toHaveText('release date')
+  await expect(page.getByRole('button', { name: 'Lines 7–9', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Lines 7–9', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'OpenDocument').length)).toBe(1)
+})
+
+test('PowerPoint search result cites its slide number', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    ;(window as any).__documentSnapshot = snapshot
+    ;(window as any).__documentHits = [{ document_id: 'deck', path: '/docs/roadmap.pptx', file_name: 'roadmap.pptx', file_type: 'pptx', chunk_index: 0, slide: 7, text: 'Product roadmap milestones.', score: .94 }]
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await page.locator('#document-query').fill('roadmap')
+  await page.locator('#document-search-form button[type="submit"]').click()
+  await page.getByRole('button', { name: 'Slide 7', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.find((call: any) => call.name === 'PreviewDocument'))).toEqual({ name: 'PreviewDocument', args: ['/docs/roadmap.pptx'] })
+  expect(await page.evaluate(() => (window as any).__calls.some((call: any) => call.name === 'OpenDocument'))).toBe(false)
+  await page.locator('#document-search-results').getByRole('button', { name: 'Extract text', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.find((call: any) => call.name === 'DocumentPlainText'))).toEqual({ name: 'DocumentPlainText', args: ['/docs/roadmap.pptx'] })
 })
 
 test('active automatic scan can be cancelled', async ({ page }) => {
@@ -63,10 +102,47 @@ test('active automatic scan can be cancelled', async ({ page }) => {
   await openDocuments(page)
   await expect(page.locator('#document-add-folder')).toBeEnabled()
   await expect(page.getByText('Saving document index')).toBeVisible()
-  await expect(page.getByText('12 found · 5 to index · 2 indexed')).toBeVisible()
+  await expect(page.getByText('12 found · 2/5 processed · 3 remaining')).toBeVisible()
   await expect(page.locator('#document-refresh')).toBeDisabled()
   await page.locator('#document-cancel-scan').click()
   await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'CancelDocumentScan').length)).toBe(1)
+})
+
+test('indexing status is read-only and retry failed reuses the safe scan path', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    ;(window as any).__documentSnapshot = {
+      ...snapshot,
+      documents: [
+        ...snapshot.documents,
+        { id: 'd2', root: '/docs', path: '/docs/broken.pdf', relative_path: 'broken.pdf', name: 'broken.pdf', file_type: 'pdf', size: 2048, modified_at: 2, tags: [], index_status: 'failed', error: 'temporary embedding timeout', chunk_count: 0 },
+      ],
+      scan_progress: { phase: 'complete', discovered: 2, pending: 2, indexed: 1, failed: 1, total_chunks: 1, cache_hits: 1, cache_misses: 0, embedding_requests: 0, embedding_ms: 0, elapsed_ms: 1200 },
+    }
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await expect(page.locator('.document-index-control')).toBeVisible()
+  await expect(page.locator('.document-index-control')).toContainText('1/2 indexed')
+  await expect(page.locator('.document-index-safety')).toContainText('Existing indexed data is preserved')
+  await expect(page.locator('.document-row-reason.failed')).toContainText('Why failed: temporary embedding timeout')
+  await page.locator('#document-retry-failed').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'RefreshDocuments').length)).toBe(1)
+})
+
+test('skipped and excluded files show their reasons inline', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    ;(window as any).__documentSnapshot = {
+      ...snapshot,
+      documents: [{ id: 'large', root: '/docs', path: '/docs/large.pdf', relative_path: 'large.pdf', name: 'large.pdf', file_type: 'pdf', size: 25_000_000, modified_at: 2, tags: [], index_status: 'skipped', error: 'file exceeds the 20 MB automatic indexing limit', chunk_count: 0 }],
+      excluded_paths: ['/docs/private.pptx'],
+    }
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await expect(page.locator('.document-row-reason.skipped')).toContainText('Why skipped: file exceeds the 20 MB automatic indexing limit')
+  await expect(page.locator('.document-row-reason.skipped')).toHaveAttribute('title', 'file exceeds the 20 MB automatic indexing limit')
+  await expect(page.locator('.document-row-copy strong')).toHaveAttribute('title', 'large.pdf')
+  await expect(page.locator('.document-scan-exceptions')).toContainText('Why excluded: Manually excluded from automatic scans')
 })
 
 test('search results are concise, highlighted, filterable and paginated', async ({ page }) => {
@@ -84,11 +160,65 @@ test('search results are concise, highlighted, filterable and paginated', async 
   await page.locator('#document-search-form button[type="submit"]').click()
   await expect(page.locator('.document-result-card')).toHaveCount(8)
   await expect(page.locator('.document-result-snippet').first()).toContainText('semantic release')
-  await expect(page.locator('.document-result-snippet').first().locator('mark')).toHaveCount(2)
+  await expect(page.locator('.document-result-snippet').first().locator('mark')).toHaveText('semantic release')
   expect((await page.locator('.document-result-snippet').first().textContent())?.length).toBeLessThanOrEqual(522)
   await page.locator('[data-document-result-type="pdf"]').click()
   await expect(page.locator('.document-result-card')).toHaveCount(1)
   await expect(page.getByText('result-11.pdf', { exact: true })).toBeVisible()
+})
+
+test('a long unbroken folder path is clipped instead of stretching the page', async ({ page }) => {
+  await installMockApp(page)
+  const longPath = '/Users/test/very/deeply/nested/project/docs/architecture/patterns/long-folder-name-that-would-not-wrap-if-left-unclipped/file.md'
+  await page.addInitScript((args) => {
+    ;(window as any).__documentSnapshot = args.snapshot
+    ;(window as any).__documentHits = [{ document_id: 'd1', path: args.longPath, file_name: 'file.md', file_type: 'md', chunk_index: 0, text: 'This mentions an architecture pattern in its content.', score: .9 }]
+  }, { snapshot: connectedSnapshot, longPath })
+  await openDocuments(page)
+  await page.locator('#document-query').fill('architecture pattern')
+  await page.locator('#document-search-form button[type="submit"]').click()
+  await expect(page.locator('.document-result-folder-path')).toBeVisible()
+  const overflowsHorizontally = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(overflowsHorizontally).toBe(false)
+})
+
+test('Ctrl+F opens a browser-style find bar for visible results', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    ;(window as any).__documentSnapshot = snapshot
+    ;(window as any).__documentHits = [{ document_id: 'd1', path: '/docs/plan.md', file_name: 'plan.md', file_type: 'md', chunk_index: 0, text: 'The release plan is ready.', score: .9 }]
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await page.locator('#document-query').fill('release plan')
+  await page.locator('#document-search-form button[type="submit"]').click()
+  await page.locator('#document-list-filter').focus()
+  await page.keyboard.press('Control+f')
+  const find = page.locator('#document-result-find-input')
+  await expect(find).toBeFocused()
+  await find.fill('plan')
+  await expect(page.locator('#document-result-find-count')).toHaveText('1/3')
+  await page.locator('[data-document-find="next"]').click()
+  await expect(page.locator('#document-result-find-count')).toHaveText('2/3')
+  await page.keyboard.press('Escape')
+  await expect(find).toHaveCount(0)
+})
+
+test('Documents renders in Vietnamese and keeps deferred AI action disabled', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    localStorage.setItem('thaloca-locale', 'vi')
+    ;(window as any).__documentSnapshot = snapshot
+    ;(window as any).__documentHits = [{ document_id: 'd1', path: '/docs/plan.md', file_name: 'plan.md', file_type: 'md', chunk_index: 0, text: 'Release plan.', score: .9 }]
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await expect(page.getByRole('heading', { name: 'Tìm đúng tệp và đoạn nội dung' })).toBeVisible()
+  await expect(page.locator('#document-query')).toHaveAttribute('placeholder', 'Tìm chính xác văn bản hoặc nhập một câu hỏi đầy đủ…')
+  await page.locator('#document-query').fill('release')
+  await page.locator('#document-search-form button[type="submit"]').click()
+  await expect(page.locator('#document-answer-results')).toBeDisabled()
+  await expect(page.locator('#document-answer-results')).toContainText('Trả lời từ các đoạn')
+  await page.keyboard.press('Control+f')
+  await expect(page.locator('#document-result-find-input')).toHaveAttribute('placeholder', 'Tìm trong kết quả…')
 })
 
 test('large libraries render in batches so controls stay responsive', async ({ page }) => {

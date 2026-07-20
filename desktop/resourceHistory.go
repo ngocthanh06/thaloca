@@ -87,6 +87,39 @@ func (a *App) sampleResourceHistory() {
 	a.resourceHistoryMu.Unlock()
 
 	a.checkMemoryLeak()
+	a.checkLocalResourceThreshold(sample)
+}
+
+// checkLocalResourceThreshold notifies when this Mac's own RAM or disk
+// usage is under the same sustained pressure threshold already used for
+// saved remote servers (see serverHealthThreshold in notifications.go).
+func (a *App) checkLocalResourceThreshold(sample ResourceSample) {
+	for _, pressure := range []struct {
+		label   string
+		percent float64
+	}{
+		{"RAM", sample.MemPercent},
+		{"disk", sample.DiskPercent},
+	} {
+		high := pressure.percent >= float64(serverHealthThreshold)
+		if !a.localPressureBecameHigh(pressure.label, high) {
+			continue
+		}
+		message := fmt.Sprintf("This Mac's %s usage is at %.0f%%", pressure.label, pressure.percent)
+		a.addEvent("health", "This Mac", "", "local", "local", "health_failed", message)
+		a.notifyOnce("local-health:"+pressure.label, "health_failed", "Local resource usage high", message)
+	}
+}
+
+func (a *App) localPressureBecameHigh(label string, high bool) bool {
+	a.localPressureMu.Lock()
+	defer a.localPressureMu.Unlock()
+	if a.localPressure == nil {
+		a.localPressure = map[string]bool{}
+	}
+	wasHigh := a.localPressure[label]
+	a.localPressure[label] = high
+	return high && !wasHigh
 }
 
 // ResourceHistory returns sampled history for the requested window

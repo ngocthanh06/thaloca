@@ -23,6 +23,9 @@ export interface RuntimeContext {
   dockerStatus: string
   searchQuery: string
   healthCache: Map<string, HealthStatus>
+  // Keyed by container ID — Docker disk usage, fetched lazily per row (see
+  // loadContainerSizes) rather than folded into the main Snapshot scan.
+  sizeCache: Map<string, string>
   pendingContainers: Map<string, string>
   jobLogs: Map<string, string>
   projectLogs: Map<string, string>
@@ -206,6 +209,8 @@ function renderContainerRow(svc: Service, ctx: RuntimeContext): string {
   const ports = Array.isArray(svc.ports) && svc.ports.length
     ? svc.ports.map(p => `<span class="port">:${p}</span>`).join('')
     : `<span class="no-port">${t('no ports')}</span>`
+  const size = svc.container_id ? ctx.sizeCache.get(svc.container_id) : undefined
+  const sizeHTML = svc.container_id ? `<span class="container-size" title="${t('Disk usage')}">${escapeHTML(size || '…')}</span>` : ''
   const id = escapeHTML(svc.container_id)
   const logs = svc.container_id ? ctx.jobLogs.get(svc.container_id) : undefined
   const imageScan = svc.container_id ? ctx.imageScans.get(svc.container_id) : undefined
@@ -221,7 +226,7 @@ function renderContainerRow(svc: Service, ctx: RuntimeContext): string {
         </div>
         <small>${escapeHTML(svc.container_id ? svc.container_id.slice(0, 12) : '')}${health?.message && !stopped && !pending ? ` · ${escapeHTML(health.message)}` : ''}</small>
       </div>
-      <span class="container-ports">${ports}</span>
+      <span class="container-ports">${ports}${sizeHTML}</span>
       <span class="status-badge status-${escapeHTML(stateClass || 'unknown')}">${escapeHTML(state || 'unknown')}</span>
       <span class="row-actions">
         ${pending ? '' : `
@@ -374,4 +379,28 @@ export async function checkAllHealth(services: Service[], healthCache: Map<strin
       healthCache.set(svc.id, { state: 'error', message: t('Check failed'), latency: 0, name: '', type: '', target: '', status_code: 0, checked_at: '' })
     }
   }))
+}
+
+// Docker has to compute each container's writable-layer size on demand
+// (`docker ps -s`), so sizes are fetched lazily per container rather than
+// folded into the main Snapshot poll — and only for containers not already
+// in sizeCache, so a container's size is fetched once, not on every 30s
+// Runtime poll.
+export async function loadContainerSizes(services: Service[], sizeCache: Map<string, string>): Promise<void> {
+  const missing = normalizeServices(services).filter(s => s.source === 'docker' && s.container_id && !sizeCache.has(s.container_id))
+  // Docker computes writable-layer sizes on demand. Keep only a few CLI
+  // processes active so a machine with dozens of stopped containers does
+  // not get a process storm when Runtime opens.
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < missing.length) {
+      const svc = missing[cursor++]
+      try {
+        sizeCache.set(svc.container_id, await api.containerSize(svc.container_id))
+      } catch {
+        sizeCache.set(svc.container_id, '')
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, missing.length) }, () => worker()))
 }

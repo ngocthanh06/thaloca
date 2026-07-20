@@ -28,6 +28,11 @@ export async function installMockApp(page: Page): Promise<void> {
           DeleteBranch: async (path: string, name: string) => { record('DeleteBranch', path, name) },
           SwitchBranch: async (path: string, name: string) => { record('SwitchBranch', path, name) },
           MergeBranch: async (path: string, name: string) => { record('MergeBranch', path, name) },
+          CreateTag: async (path: string, name: string, target: string, message: string) => { record('CreateTag', path, name, target, message) },
+          CheckoutTag: async (path: string, name: string) => { record('CheckoutTag', path, name) },
+          PushTag: async (path: string, name: string) => { record('PushTag', path, name) },
+          DeleteTag: async (path: string, name: string) => { record('DeleteTag', path, name) },
+          DeleteRemoteTag: async (path: string, name: string) => { record('DeleteRemoteTag', path, name) },
           Snapshot: async () => ({
             services: [
               { id: 'docker:c1', name: 'shop-api', source: 'docker', ports: [8080], health_url: 'http://localhost:8080/health', status: 'running', pid: 0, container_id: 'c1abcdef0123', repo_path: '', command: '', labels: {}, project: 'shop' },
@@ -68,11 +73,13 @@ export async function installMockApp(page: Page): Promise<void> {
           RepoCommits: async () => ([{ hash: '3a712fe1234', subject: 'Fix payment retry bug', author: 'Thanh', author_email: 'a@b.com', occurred_at: new Date().toISOString(), repo_name: 'shop-api', repo_path: repo1 }]),
           RepoGraph: async () => ([]),
           RepoBranches: async () => ([{ name: 'main', current: true }, { name: 'feature/x', current: false }]),
+          RepoTags: async () => ([{ name: 'v1.2.3', commit_hash: '3a712fe1', subject: 'Release 1.2.3', creator: 'Thanh', created_at: new Date().toISOString(), annotated: true }]),
           RepoFiles: async () => ([{ name: 'src', path: 'src', is_dir: true }]),
           GitHubStatus: async () => ({ configured: false, authenticated: false, message: 'not connected' }),
           ListPullRequests: async () => ([]),
           ProjectLogs: async (project: string) => `shop-api-1  | listening on :8080\nshop-worker-1  | job picked up (project=${project})`,
           ContainerLogs: async (id: string) => `log line for container ${id}`,
+          ContainerSize: async () => '1.2MB (virtual 245MB)',
           ListServers: async () => ([
             { id: 'srv-1', name: 'API prod', host: '1.2.3.4', port: 22, user: 'ubuntu', key_path: '/keys/prod.pem', environment: 'production' },
           ]),
@@ -156,18 +163,60 @@ export async function installMockApp(page: Page): Promise<void> {
           }),
           AddDocumentFolder: async (path: string) => { record('AddDocumentFolder', path); return (window as any).__documentSnapshot },
           RemoveDocumentFolder: async (path: string) => { record('RemoveDocumentFolder', path); return (window as any).__documentSnapshot },
+          RenameDocumentFolder: async (path: string, name: string) => {
+            record('RenameDocumentFolder', path, name)
+            const current = (window as any).__documentSnapshot
+            return { ...current, roots: current.roots.map((root: any) => root.path === path ? { ...root, name } : root) }
+          },
           RefreshDocuments: async () => { record('RefreshDocuments'); return (window as any).__documentSnapshot },
           CancelDocumentScan: async () => { record('CancelDocumentScan'); return true },
           SearchDocuments: async (query: string) => {
             record('SearchDocuments', query)
             return (window as any).__documentHits || []
           },
+          SemanticSearchDocuments: async (query: string) => {
+            record('SemanticSearchDocuments', query)
+            return (window as any).__documentHits || []
+          },
           AskDocuments: async (query: string) => {
             record('AskDocuments', query)
             return (window as any).__documentAnswer || { answer: '', citations: [] }
           },
+          AskDocumentPassages: async (query: string, passages: any[]) => {
+            record('AskDocumentPassages', query, passages)
+            return (window as any).__documentAnswer || { answer: '', citations: passages }
+          },
           OpenDocument: async (path: string) => { record('OpenDocument', path) },
+          PreviewDocument: async (path: string) => { record('PreviewDocument', path) },
+          DocumentPlainText: async (path: string) => { record('DocumentPlainText', path); return '[Slide 3]\nMethod: GET' },
           RevealDocument: async (path: string) => { record('RevealDocument', path) },
+          ListCaptures: async () => (window as any).__capturesSnapshot || ({
+            location: '/Users/test/Desktop', dedicated_folder: '/Users/test/Pictures/Thaloca Captures', using_dedicated: false, captures: [],
+          }),
+          OpenCapture: async (path: string) => { record('OpenCapture', path) },
+          RevealCapture: async (path: string) => { record('RevealCapture', path) },
+          CopyCaptureFile: async (path: string) => { record('CopyCaptureFile', path) },
+          CopyCaptureImage: async (path: string) => { record('CopyCaptureImage', path) },
+          CaptureOCR: async (path: string) => { record('CaptureOCR', path); return 'Recognized text' },
+          EditCapture: async (path: string) => { record('EditCapture', path) },
+          RenameCapture: async (path: string, newName: string) => { record('RenameCapture', path, newName); return (window as any).__capturesSnapshot },
+          DeleteCapture: async (path: string) => { record('DeleteCapture', path); return (window as any).__capturesSnapshot },
+          CaptureThumbnail: async () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+          PickCaptureFolder: async () => (window as any).__capturePickedFolder ?? '/Users/test/Shots',
+          UseDedicatedCaptureFolder: async (moveExisting: boolean) => { record('UseDedicatedCaptureFolder', moveExisting); return (window as any).__capturesSnapshot },
+          SetCaptureFolder: async (path: string) => { record('SetCaptureFolder', path); return (window as any).__capturesSnapshot },
+          LoadCaptureImage: async (path: string) => {
+            record('LoadCaptureImage', path)
+            return (window as any).__captureImageDataURI || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+          },
+          SaveEditedCapture: async (path: string, dataURI: string) => {
+            record('SaveEditedCapture', path, dataURI)
+            return (window as any).__capturesSnapshot
+          },
+          SaveEditedCaptureAs: async (path: string, dataURI: string, suggestedName: string) => {
+            record('SaveEditedCaptureAs', path, dataURI, suggestedName)
+            return (window as any).__captureSaveAsPath ?? '/Users/test/Desktop/' + suggestedName
+          },
         },
       },
     }

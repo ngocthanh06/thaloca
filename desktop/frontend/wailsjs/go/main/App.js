@@ -22,12 +22,24 @@ export function AppendTerminalHistory(arg1, arg2) {
   return window['go']['main']['App']['AppendTerminalHistory'](arg1, arg2);
 }
 
+export function AskDocumentPassages(arg1, arg2) {
+  return window['go']['main']['App']['AskDocumentPassages'](arg1, arg2);
+}
+
 export function AskDocuments(arg1) {
   return window['go']['main']['App']['AskDocuments'](arg1);
 }
 
 export function CancelDocumentScan() {
   return window['go']['main']['App']['CancelDocumentScan']();
+}
+
+export function CaptureOCR(arg1) {
+  return window['go']['main']['App']['CaptureOCR'](arg1);
+}
+
+export function CaptureThumbnail(arg1) {
+  return window['go']['main']['App']['CaptureThumbnail'](arg1);
 }
 
 export function CheckForUpdate() {
@@ -44,6 +56,10 @@ export function CheckServer(arg1) {
 
 export function CheckServerDraft(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['CheckServerDraft'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function CheckoutTag(arg1, arg2) {
+  return window['go']['main']['App']['CheckoutTag'](arg1, arg2);
 }
 
 export function ClearClipboardHistory() {
@@ -94,6 +110,18 @@ export function ContainerLogs(arg1) {
   return window['go']['main']['App']['ContainerLogs'](arg1);
 }
 
+export function ContainerSize(arg1) {
+  return window['go']['main']['App']['ContainerSize'](arg1);
+}
+
+export function CopyCaptureFile(arg1) {
+  return window['go']['main']['App']['CopyCaptureFile'](arg1);
+}
+
+export function CopyCaptureImage(arg1) {
+  return window['go']['main']['App']['CopyCaptureImage'](arg1);
+}
+
 export function CountPullRequests(arg1, arg2) {
   return window['go']['main']['App']['CountPullRequests'](arg1, arg2);
 }
@@ -110,8 +138,16 @@ export function CreateReviewComment(arg1, arg2, arg3, arg4, arg5, arg6, arg7, ar
   return window['go']['main']['App']['CreateReviewComment'](arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 }
 
+export function CreateTag(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CreateTag'](arg1, arg2, arg3, arg4);
+}
+
 export function DeleteBranch(arg1, arg2) {
   return window['go']['main']['App']['DeleteBranch'](arg1, arg2);
+}
+
+export function DeleteCapture(arg1) {
+  return window['go']['main']['App']['DeleteCapture'](arg1);
 }
 
 export function DeleteClipboardEntry(arg1) {
@@ -120,6 +156,18 @@ export function DeleteClipboardEntry(arg1) {
 
 export function DeleteInstalledApp(arg1) {
   return window['go']['main']['App']['DeleteInstalledApp'](arg1);
+}
+
+export function DeleteRemoteTag(arg1, arg2) {
+  return window['go']['main']['App']['DeleteRemoteTag'](arg1, arg2);
+}
+
+export function DeleteTag(arg1, arg2) {
+  return window['go']['main']['App']['DeleteTag'](arg1, arg2);
+}
+
+export function DeleteWorkspaceProfile(arg1) {
+  return window['go']['main']['App']['DeleteWorkspaceProfile'](arg1);
 }
 
 export function DisableGitEvents(arg1) {
@@ -134,16 +182,28 @@ export function DocumentLibrary() {
   return window['go']['main']['App']['DocumentLibrary']();
 }
 
+export function DocumentPlainText(arg1) {
+  return window['go']['main']['App']['DocumentPlainText'](arg1);
+}
+
 export function DownloadServerFile(arg1, arg2, arg3) {
   return window['go']['main']['App']['DownloadServerFile'](arg1, arg2, arg3);
+}
+
+export function EditCapture(arg1) {
+  return window['go']['main']['App']['EditCapture'](arg1);
 }
 
 export function EnableGitEvents(arg1) {
   return window['go']['main']['App']['EnableGitEvents'](arg1);
 }
 
-export function ExportConfig(arg1) {
-  return window['go']['main']['App']['ExportConfig'](arg1);
+export function ExcludeDocument(arg1) {
+  return window['go']['main']['App']['ExcludeDocument'](arg1);
+}
+
+export function ExportConfig(arg1, arg2) {
+  return window['go']['main']['App']['ExportConfig'](arg1, arg2);
 }
 
 export function FetchRepo(arg1) {
@@ -282,6 +342,10 @@ export function ListBrewPackages() {
   return window['go']['main']['App']['ListBrewPackages']();
 }
 
+export function ListCaptures() {
+  return window['go']['main']['App']['ListCaptures']();
+}
+
 export function ListConfigFiles() {
   return window['go']['main']['App']['ListConfigFiles']();
 }
@@ -338,6 +402,10 @@ export function ListVPNEngines() {
   return window['go']['main']['App']['ListVPNEngines']();
 }
 
+export function LoadCaptureImage(arg1) {
+  return window['go']['main']['App']['LoadCaptureImage'](arg1);
+}
+
 export function MarkPullRequestReadyForReview(arg1, arg2) {
   return window['go']['main']['App']['MarkPullRequestReadyForReview'](arg1, arg2);
 }
@@ -352,6 +420,10 @@ export function MergePullRequest(arg1, arg2, arg3) {
 
 export function Notify(arg1, arg2) {
   return window['go']['main']['App']['Notify'](arg1, arg2);
+}
+
+export function OpenCapture(arg1) {
+  return window['go']['main']['App']['OpenCapture'](arg1);
 }
 
 export function OpenContainerTerminal(arg1) {
@@ -390,6 +462,10 @@ export function PerformSelfUpdate(arg1) {
   return window['go']['main']['App']['PerformSelfUpdate'](arg1);
 }
 
+export function PickCaptureFolder() {
+  return window['go']['main']['App']['PickCaptureFolder']();
+}
+
 export function PickDocumentFolder() {
   return window['go']['main']['App']['PickDocumentFolder']();
 }
@@ -410,8 +486,16 @@ export function PickUploadFile() {
   return window['go']['main']['App']['PickUploadFile']();
 }
 
+export function PreviewDocument(arg1) {
+  return window['go']['main']['App']['PreviewDocument'](arg1);
+}
+
 export function ProcessLogs(arg1) {
   return window['go']['main']['App']['ProcessLogs'](arg1);
+}
+
+export function ProductPreferences() {
+  return window['go']['main']['App']['ProductPreferences']();
 }
 
 export function ProjectLogs(arg1) {
@@ -444,6 +528,10 @@ export function PushBranch(arg1, arg2) {
 
 export function PushRepo(arg1) {
   return window['go']['main']['App']['PushRepo'](arg1);
+}
+
+export function PushTag(arg1, arg2) {
+  return window['go']['main']['App']['PushTag'](arg1, arg2);
 }
 
 export function QuitInstalledApp(arg1) {
@@ -494,6 +582,14 @@ export function RemoveServerVPNConfig(arg1) {
   return window['go']['main']['App']['RemoveServerVPNConfig'](arg1);
 }
 
+export function RenameCapture(arg1, arg2) {
+  return window['go']['main']['App']['RenameCapture'](arg1, arg2);
+}
+
+export function RenameDocumentFolder(arg1, arg2) {
+  return window['go']['main']['App']['RenameDocumentFolder'](arg1, arg2);
+}
+
 export function ReopenPullRequest(arg1, arg2) {
   return window['go']['main']['App']['ReopenPullRequest'](arg1, arg2);
 }
@@ -524,6 +620,10 @@ export function RepoGitHubOwner(arg1) {
 
 export function RepoGraph(arg1, arg2) {
   return window['go']['main']['App']['RepoGraph'](arg1, arg2);
+}
+
+export function RepoTags(arg1) {
+  return window['go']['main']['App']['RepoTags'](arg1);
 }
 
 export function RequestReviewers(arg1, arg2, arg3) {
@@ -558,6 +658,14 @@ export function RestartServerContainer(arg1, arg2) {
   return window['go']['main']['App']['RestartServerContainer'](arg1, arg2);
 }
 
+export function RestoreExcludedDocument(arg1) {
+  return window['go']['main']['App']['RestoreExcludedDocument'](arg1);
+}
+
+export function RevealCapture(arg1) {
+  return window['go']['main']['App']['RevealCapture'](arg1);
+}
+
 export function RevealDocument(arg1) {
   return window['go']['main']['App']['RevealDocument'](arg1);
 }
@@ -586,6 +694,18 @@ export function RunToolAction(arg1, arg2) {
   return window['go']['main']['App']['RunToolAction'](arg1, arg2);
 }
 
+export function SaveEditedCapture(arg1, arg2) {
+  return window['go']['main']['App']['SaveEditedCapture'](arg1, arg2);
+}
+
+export function SaveEditedCaptureAs(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SaveEditedCaptureAs'](arg1, arg2, arg3);
+}
+
+export function SaveWorkspaceProfile(arg1) {
+  return window['go']['main']['App']['SaveWorkspaceProfile'](arg1);
+}
+
 export function ScanContainerImage(arg1) {
   return window['go']['main']['App']['ScanContainerImage'](arg1);
 }
@@ -602,6 +722,10 @@ export function SearchLanguagePackages(arg1, arg2) {
   return window['go']['main']['App']['SearchLanguagePackages'](arg1, arg2);
 }
 
+export function SemanticSearchDocuments(arg1) {
+  return window['go']['main']['App']['SemanticSearchDocuments'](arg1);
+}
+
 export function ServerContainerLogs(arg1, arg2) {
   return window['go']['main']['App']['ServerContainerLogs'](arg1, arg2);
 }
@@ -610,8 +734,16 @@ export function ServerVPNStatus(arg1) {
   return window['go']['main']['App']['ServerVPNStatus'](arg1);
 }
 
+export function SetCaptureFolder(arg1) {
+  return window['go']['main']['App']['SetCaptureFolder'](arg1);
+}
+
 export function SetClipboardHistoryEnabled(arg1) {
   return window['go']['main']['App']['SetClipboardHistoryEnabled'](arg1);
+}
+
+export function SetDocumentRootPolicy(arg1, arg2) {
+  return window['go']['main']['App']['SetDocumentRootPolicy'](arg1, arg2);
 }
 
 export function SetGitHubClientID(arg1) {
@@ -624,6 +756,10 @@ export function SetMineOnly(arg1) {
 
 export function SetNotificationSettings(arg1) {
   return window['go']['main']['App']['SetNotificationSettings'](arg1);
+}
+
+export function SetProjectExpectedState(arg1, arg2) {
+  return window['go']['main']['App']['SetProjectExpectedState'](arg1, arg2);
 }
 
 export function SetPullRequestLabels(arg1, arg2, arg3) {
@@ -744,6 +880,10 @@ export function UpdateServer(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) {
 
 export function UploadServerFile(arg1, arg2, arg3) {
   return window['go']['main']['App']['UploadServerFile'](arg1, arg2, arg3);
+}
+
+export function UseDedicatedCaptureFolder(arg1) {
+  return window['go']['main']['App']['UseDedicatedCaptureFolder'](arg1);
 }
 
 export function WriteContainerTerminal(arg1, arg2) {

@@ -20,16 +20,18 @@ step required.
 - HTTP/TCP/TLS health checks against common endpoints (`/health`, `/healthz`,
   `/ready`, `/live`, `/actuator/health`, `/ping`, `/`).
 - Overview groups everything into per-project cards (via Docker Compose's own
-  project label) and surfaces an anomaly strip for restart loops, degraded
-  health, PM2 `errored` jobs, and log-pattern errors (panics/OOM/repeated
-  failures) scanned from container logs.
+  project label), supports saved workspace filters and expected project state,
+  and surfaces incidents for restart loops, degraded health, PM2 `errored`
+  jobs, resource pressure, and log-pattern errors.
 
 **Source Control** — works like SourceTree: stage/unstage, per-file colored
 diffs, commit, conflict resolution ("ours"/"theirs"), commit graph across
 branches, Fetch/Pull/Push/Stash. GitHub login via OAuth device flow (or reuses
 an active `gh auth` session) powers a full Pull Requests tab: list with
 filters/search, Conversation/Commits/Checks/Files-changed detail, inline
-review comments on a GitHub-style split diff, merge/squash/rebase.
+review comments on a GitHub-style split diff, merge/squash/rebase. The Tags
+tab creates annotated release tags and can checkout, push, or delete local and
+remote tags independently.
 
 **Resources** — live CPU/memory/disk/network/GPU usage, a full process list
 (sortable, killable), installed-apps scan with CPU/Mem and open/quit actions,
@@ -40,17 +42,21 @@ a project's manifest asking for a tool that isn't installed, and offers
 one-click Install/Update through Homebrew (with the exact command shown
 before running).
 
-**Documents** — manages folders of existing PDF, DOCX, TXT, and Markdown
+**Documents** — manages folders of existing PDF, PPTX, DOCX, TXT, and Markdown
 files without uploading or copying them. Thaloca scans the folders at startup
 and every minute, indexes changed files into its own `thaloca_documents`
 collection, and returns semantic matches with page/line/paragraph citations.
-Search and Ask AI use a separately installed
+Semantic indexing and search use a separately installed
 [LongBrain (Hermes Agent)](https://longbrain.cc.cd) runtime. Thaloca only
-indexes with embedding providers verified as local, and only enables Ask AI
-for an explicit allowlist of local LLM providers; external or unknown
+indexes with embedding providers verified as local; external or unknown
 providers remain blocked. When LongBrain is unavailable, Thaloca shows the
-installation guide and command and leaves dependent actions disabled. Thaloca
-never installs or modifies the Hermes Agent repository.
+installation guide and leaves dependent actions disabled. Thaloca never
+installs or modifies the Hermes Agent repository.
+
+**Captures** — monitors the configured macOS screenshot folder, previews and
+copies screenshots or recordings, extracts text locally with Vision OCR, and
+offers an in-app PNG/JPEG markup editor. Rename and folder migration preserve
+the original files; delete moves files to Finder Trash.
 
 **Servers** — SSH-managed remote hosts: structured health checks (polled
 automatically in the background, with a notification if a server drops

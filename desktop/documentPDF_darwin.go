@@ -5,7 +5,7 @@ package main
 /*
 #cgo LDFLAGS: -framework Foundation -framework PDFKit
 #include <stdlib.h>
-char *ThalocaExtractPDFPages(const char *path);
+char *ThalocaExtractPDFPages(const char *path, int maxPages);
 */
 import "C"
 import (
@@ -14,10 +14,10 @@ import (
 	"unsafe"
 )
 
-func extractPDFPages(path string) ([]string, error) {
+func extractPDFPages(path string, maxPages int) ([]string, error) {
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
-	raw := C.ThalocaExtractPDFPages(cpath)
+	raw := C.ThalocaExtractPDFPages(cpath, C.int(maxPages))
 	if raw == nil {
 		return nil, fmt.Errorf("PDFKit could not read the document")
 	}

@@ -318,6 +318,64 @@ export namespace main {
 	        this.idle_percent = source["idle_percent"];
 	    }
 	}
+	export class CaptureFile {
+	    path: string;
+	    name: string;
+	    kind: string;
+	    size: number;
+	    modified_at: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CaptureFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.kind = source["kind"];
+	        this.size = source["size"];
+	        this.modified_at = source["modified_at"];
+	    }
+	}
+	export class CapturesSnapshot {
+	    location: string;
+	    dedicated_folder: string;
+	    using_dedicated: boolean;
+	    captures: CaptureFile[];
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CapturesSnapshot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.location = source["location"];
+	        this.dedicated_folder = source["dedicated_folder"];
+	        this.using_dedicated = source["using_dedicated"];
+	        this.captures = this.convertValues(source["captures"], CaptureFile);
+	        this.error = source["error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class CheckRun {
 	    name: string;
 	    status: string;
@@ -372,6 +430,90 @@ export namespace main {
 	        this.additions = source["additions"];
 	        this.deletions = source["deletions"];
 	    }
+	}
+	export class DocumentRoot {
+	    path: string;
+	    added_at: string;
+	    name?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentRoot(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.added_at = source["added_at"];
+	        this.name = source["name"];
+	    }
+	}
+	export class DocumentRootPolicy {
+	    mode: string;
+	    max_mb: number;
+	    max_pages: number;
+	    max_slides: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DocumentRootPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.max_mb = source["max_mb"];
+	        this.max_pages = source["max_pages"];
+	        this.max_slides = source["max_slides"];
+	    }
+	}
+	export class WorkspaceProfile {
+	    id: string;
+	    name: string;
+	    projects: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkspaceProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.projects = source["projects"];
+	    }
+	}
+	export class ProductPreferences {
+	    expected_projects: Record<string, string>;
+	    workspaces: WorkspaceProfile[];
+	    document_policies: Record<string, DocumentRootPolicy>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProductPreferences(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.expected_projects = source["expected_projects"];
+	        this.workspaces = this.convertValues(source["workspaces"], WorkspaceProfile);
+	        this.document_policies = this.convertValues(source["document_policies"], DocumentRootPolicy, true);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class NotificationSettings {
 	    enabled: boolean;
@@ -435,7 +577,11 @@ export namespace main {
 	    event_repos: string[];
 	    mine_only: boolean;
 	    pinned_repos: string[];
+	    keyboard_shortcuts: Record<string, string>;
 	    notification_settings: NotificationSettings;
+	    product_preferences: ProductPreferences;
+	    document_roots: DocumentRoot[];
+	    document_exclusions: string[];
 	    exported_at: string;
 	
 	    static createFrom(source: any = {}) {
@@ -449,7 +595,11 @@ export namespace main {
 	        this.event_repos = source["event_repos"];
 	        this.mine_only = source["mine_only"];
 	        this.pinned_repos = source["pinned_repos"];
+	        this.keyboard_shortcuts = source["keyboard_shortcuts"];
 	        this.notification_settings = this.convertValues(source["notification_settings"], NotificationSettings);
+	        this.product_preferences = this.convertValues(source["product_preferences"], ProductPreferences);
+	        this.document_roots = this.convertValues(source["document_roots"], DocumentRoot);
+	        this.document_exclusions = source["document_exclusions"];
 	        this.exported_at = source["exported_at"];
 	    }
 	
@@ -600,6 +750,7 @@ export namespace main {
 	    file_type: string;
 	    chunk_index: number;
 	    page?: number;
+	    slide?: number;
 	    line_start?: number;
 	    line_end?: number;
 	    paragraph_start?: number;
@@ -620,6 +771,7 @@ export namespace main {
 	        this.file_type = source["file_type"];
 	        this.chunk_index = source["chunk_index"];
 	        this.page = source["page"];
+	        this.slide = source["slide"];
 	        this.line_start = source["line_start"];
 	        this.line_end = source["line_end"];
 	        this.paragraph_start = source["paragraph_start"];
@@ -661,20 +813,22 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class DocumentRoot {
-	    path: string;
-	    added_at: string;
+	export class DocumentEmbeddingBatchMetric {
+	    texts: number;
+	    duration_ms: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new DocumentRoot(source);
+	        return new DocumentEmbeddingBatchMetric(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.added_at = source["added_at"];
+	        this.texts = source["texts"];
+	        this.duration_ms = source["duration_ms"];
 	    }
 	}
+	
+	
 	export class DocumentScanProgress {
 	    phase: string;
 	    current_file?: string;
@@ -682,6 +836,13 @@ export namespace main {
 	    pending: number;
 	    indexed: number;
 	    failed: number;
+	    total_chunks: number;
+	    cache_hits: number;
+	    cache_misses: number;
+	    embedding_requests: number;
+	    embedding_ms: number;
+	    elapsed_ms: number;
+	    embedding_batches?: DocumentEmbeddingBatchMetric[];
 	
 	    static createFrom(source: any = {}) {
 	        return new DocumentScanProgress(source);
@@ -695,7 +856,32 @@ export namespace main {
 	        this.pending = source["pending"];
 	        this.indexed = source["indexed"];
 	        this.failed = source["failed"];
+	        this.total_chunks = source["total_chunks"];
+	        this.cache_hits = source["cache_hits"];
+	        this.cache_misses = source["cache_misses"];
+	        this.embedding_requests = source["embedding_requests"];
+	        this.embedding_ms = source["embedding_ms"];
+	        this.elapsed_ms = source["elapsed_ms"];
+	        this.embedding_batches = this.convertValues(source["embedding_batches"], DocumentEmbeddingBatchMetric);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	
 	export class LongbrainDocumentStatus {
@@ -705,6 +891,8 @@ export namespace main {
 	    llm_available: boolean;
 	    embedding_provider: string;
 	    embedding_model: string;
+	    embedding_dimension: number;
+	    embedding_fingerprint: string;
 	    embedding_local: boolean;
 	    llm_provider: string;
 	    llm_model: string;
@@ -725,6 +913,8 @@ export namespace main {
 	        this.llm_available = source["llm_available"];
 	        this.embedding_provider = source["embedding_provider"];
 	        this.embedding_model = source["embedding_model"];
+	        this.embedding_dimension = source["embedding_dimension"];
+	        this.embedding_fingerprint = source["embedding_fingerprint"];
 	        this.embedding_local = source["embedding_local"];
 	        this.llm_provider = source["llm_provider"];
 	        this.llm_model = source["llm_model"];
@@ -775,6 +965,7 @@ export namespace main {
 	export class DocumentSnapshot {
 	    roots: DocumentRoot[];
 	    documents: ManagedDocument[];
+	    excluded_paths: string[];
 	    longbrain: LongbrainDocumentStatus;
 	    scanning: boolean;
 	    scan_cancelled: boolean;
@@ -789,6 +980,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.roots = this.convertValues(source["roots"], DocumentRoot);
 	        this.documents = this.convertValues(source["documents"], ManagedDocument);
+	        this.excluded_paths = source["excluded_paths"];
 	        this.longbrain = this.convertValues(source["longbrain"], LongbrainDocumentStatus);
 	        this.scanning = source["scanning"];
 	        this.scan_cancelled = source["scan_cancelled"];
@@ -1140,6 +1332,7 @@ export namespace main {
 	        this.project = source["project"];
 	    }
 	}
+	
 	export class ProjectGroup {
 	    name: string;
 	    services: discovery.Service[];
@@ -1147,6 +1340,7 @@ export namespace main {
 	    healthy: number;
 	    degraded: number;
 	    down: number;
+	    expected_state?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProjectGroup(source);
@@ -1160,6 +1354,7 @@ export namespace main {
 	        this.healthy = source["healthy"];
 	        this.degraded = source["degraded"];
 	        this.down = source["down"];
+	        this.expected_state = source["expected_state"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1476,6 +1671,28 @@ export namespace main {
 	        this.name = source["name"];
 	        this.dir = source["dir"];
 	        this.size = source["size"];
+	    }
+	}
+	export class RepoTag {
+	    name: string;
+	    commit_hash: string;
+	    subject: string;
+	    creator: string;
+	    created_at: string;
+	    annotated: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new RepoTag(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.commit_hash = source["commit_hash"];
+	        this.subject = source["subject"];
+	        this.creator = source["creator"];
+	        this.created_at = source["created_at"];
+	        this.annotated = source["annotated"];
 	    }
 	}
 	
