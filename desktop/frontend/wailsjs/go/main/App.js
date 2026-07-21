@@ -222,12 +222,24 @@ export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
+export function GetAutoUpdateEnabled() {
+  return window['go']['main']['App']['GetAutoUpdateEnabled']();
+}
+
 export function GetClipboardHistoryEnabled() {
   return window['go']['main']['App']['GetClipboardHistoryEnabled']();
 }
 
 export function GetContainerRuntimeStatus() {
   return window['go']['main']['App']['GetContainerRuntimeStatus']();
+}
+
+export function GetDocumentsOCREnabled() {
+  return window['go']['main']['App']['GetDocumentsOCREnabled']();
+}
+
+export function GetDocumentsUnlimitedEnabled() {
+  return window['go']['main']['App']['GetDocumentsUnlimitedEnabled']();
 }
 
 export function GetEnvFileContent(arg1, arg2) {
@@ -734,6 +746,10 @@ export function ServerVPNStatus(arg1) {
   return window['go']['main']['App']['ServerVPNStatus'](arg1);
 }
 
+export function SetAutoUpdateEnabled(arg1) {
+  return window['go']['main']['App']['SetAutoUpdateEnabled'](arg1);
+}
+
 export function SetCaptureFolder(arg1) {
   return window['go']['main']['App']['SetCaptureFolder'](arg1);
 }
@@ -744,6 +760,14 @@ export function SetClipboardHistoryEnabled(arg1) {
 
 export function SetDocumentRootPolicy(arg1, arg2) {
   return window['go']['main']['App']['SetDocumentRootPolicy'](arg1, arg2);
+}
+
+export function SetDocumentsOCREnabled(arg1) {
+  return window['go']['main']['App']['SetDocumentsOCREnabled'](arg1);
+}
+
+export function SetDocumentsUnlimitedEnabled(arg1) {
+  return window['go']['main']['App']['SetDocumentsUnlimitedEnabled'](arg1);
 }
 
 export function SetGitHubClientID(arg1) {

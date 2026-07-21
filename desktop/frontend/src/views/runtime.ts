@@ -95,7 +95,7 @@ export function renderServicesView(ctx: RuntimeContext): void {
 // data-engine-start/-stop/-install carry which engine; data-open-external
 // (Download) is already generic, handled the same way everywhere else in
 // the app.
-export function renderRuntimeEngineCard(status: ContainerRuntimeStatus | null, busyKind: string): void {
+export function renderRuntimeEngineCard(status: ContainerRuntimeStatus | null, busyKind: string, busyLabel: string): void {
   const el = document.getElementById('runtime-engine-card')
   if (!el || !status) { if (el) el.innerHTML = ''; return }
 
@@ -103,7 +103,7 @@ export function renderRuntimeEngineCard(status: ContainerRuntimeStatus | null, b
     const busy = busyKind === engine.kind
     let action = ''
     if (busy) {
-      action = `<span class="muted">${t('Working…')}</span>`
+      action = `<span class="muted">${escapeHTML(t(busyLabel || 'Working'))}…</span>`
     } else if (engine.running) {
       action = `<button class="repo-action danger" data-engine-stop="${escapeHTML(engine.kind)}">${t('Stop')}</button>`
     } else if (engine.installed) {

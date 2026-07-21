@@ -63,6 +63,9 @@ let containerRuntimeStatusInFlight: Promise<void> | null = null
 // flight — disables that row's button so a slow VM start can't be
 // double-clicked into two overlapping start attempts.
 let engineActionBusy = ''
+// Which action is in flight for engineActionBusy, so the row can say
+// "Starting…"/"Stopping…"/"Installing…" instead of a generic "Working…".
+let engineActionLabel = ''
 let activity: ActivitySummary | null = null
 let overview: OverviewResult | null = null
 let resources: ResourceSnapshot | null = null
@@ -280,15 +283,11 @@ function renderApp() {
                 <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
               </svg>
             </button>
-            <button id="fullscreen-btn" class="btn-icon" title="${t('Toggle fullscreen')}">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>
-              </svg>
-            </button>
             <button id="refresh-btn" class="primary">${t('Refresh')}</button>
           </div>
         </header>
         <div id="error-banner" class="error-banner"></div>
+        <div id="success-banner" class="success-banner"></div>
 
         <section id="overview-view" class="view active"></section>
 
@@ -527,8 +526,6 @@ function applyLocaleToShell(): void {
   renderThemeToggleIcon()
   const settingsBtn = document.getElementById('settings-btn')
   if (settingsBtn) settingsBtn.title = t('Settings')
-  const fullscreenBtn = document.getElementById('fullscreen-btn')
-  if (fullscreenBtn) fullscreenBtn.title = t('Toggle fullscreen')
   // Leave the Refresh/Tools-Refresh buttons alone if a job is mid-flight —
   // they're showing "Refreshing…" and refreshTools()'s own finally block
   // already restores the localized "Refresh" label when it completes.
@@ -1634,8 +1631,6 @@ function bindEvents() {
 
   document.getElementById('tools-refresh')!.addEventListener('click', event => { void refreshTools(event.currentTarget as HTMLButtonElement) })
 
-  document.getElementById('fullscreen-btn')!.addEventListener('click', () => { void api.toggleFullscreen() })
-
   document.getElementById('theme-toggle-btn')!.addEventListener('click', toggleTheme)
   document.getElementById('settings-btn')!.addEventListener('click', () => { void openSettingsPanel() })
   document.getElementById('clipboard-btn')!.addEventListener('click', () => { void openClipboardHistoryPanel() })
@@ -1844,6 +1839,7 @@ function loadContainerRuntimeStatus(): Promise<void> {
 async function handleEngineStart(kind: string): Promise<void> {
   if (engineActionBusy) return
   engineActionBusy = kind
+  engineActionLabel = 'starting'
   renderEngineCard()
   try {
     await api.startContainerRuntime(kind)
@@ -1851,6 +1847,7 @@ async function handleEngineStart(kind: string): Promise<void> {
     showError(String(error))
   }
   engineActionBusy = ''
+  engineActionLabel = ''
   await refreshRuntime()
 }
 
@@ -1859,6 +1856,7 @@ async function handleEngineStop(kind: string): Promise<void> {
   const name = containerRuntimeStatus?.engines.find(engine => engine.kind === kind)?.name || kind
   if (!(await api.confirmDialog(t('Stop container runtime'), `${t('Stop')} ${name}? ${t('Every container running in it will stop too.')}`))) return
   engineActionBusy = kind
+  engineActionLabel = 'stopping'
   renderEngineCard()
   try {
     await api.stopContainerRuntime(kind)
@@ -1866,6 +1864,7 @@ async function handleEngineStop(kind: string): Promise<void> {
     showError(String(error))
   }
   engineActionBusy = ''
+  engineActionLabel = ''
   await refreshRuntime()
 }
 
@@ -1876,16 +1875,19 @@ async function handleEngineInstall(): Promise<void> {
     t('This runs "brew install colima docker docker-compose docker-buildx" — Homebrew will download and install these on your Mac. This can take several minutes and a few hundred MB of disk space. Continue?'),
   ))) return
   engineActionBusy = 'colima'
+  engineActionLabel = 'installing'
   renderEngineCard()
   try {
     await api.installColima()
   } catch (error) {
     showError(String(error))
     engineActionBusy = ''
+    engineActionLabel = ''
     renderEngineCard()
     return
   }
   engineActionBusy = ''
+  engineActionLabel = ''
   await loadContainerRuntimeStatus()
 }
 
@@ -2646,6 +2648,7 @@ async function handleProjectAction(button: HTMLButtonElement) {
   const isStart = Boolean(button.dataset.startProject)
   const isRestart = Boolean(button.dataset.restartProject)
   const project = button.dataset.startProject || button.dataset.stopProject || button.dataset.restartProject || ''
+  if (pendingProjects.has(project)) return
   // Restart applies to every container (docker restart also starts stopped
   // ones); start only targets stopped, stop only running.
   const targets = normalizeServices(services).filter(s => s.source === 'docker'
@@ -2681,13 +2684,23 @@ async function handleProjectAction(button: HTMLButtonElement) {
   if (failures.length) {
     showError(`${failures.length}/${targets.length} ${t('container(s) failed:')} ${String(failures[0].reason)}`)
   }
+  targets.forEach((svc, i) => {
+    if (results[i].status === 'fulfilled') setOptimisticContainerStatus(svc.container_id, isStart || isRestart ? 'running' : 'stopped')
+  })
   for (const svc of targets) pendingContainers.delete(svc.container_id)
   pendingProjects.delete(project)
+  renderServices()
   await refreshRuntime()
 }
 
 async function handleContainerOrProcessAction(button: HTMLButtonElement) {
   const containerID = button.dataset.startContainer || button.dataset.restartContainer || button.dataset.stopContainer || ''
+  // Belt-and-suspenders: the container row's own action buttons already
+  // disappear the instant pendingContainers is set (see renderContainerRow),
+  // but a repeat click routed through some other path (keyboard, a stale
+  // event) should still be a no-op instead of firing a second overlapping
+  // start/stop/restart for the same container.
+  if (containerID && pendingContainers.has(containerID)) return
   const processFromResources = Boolean(button.closest('#resources-content'))
   let processPID = 0
   try {
@@ -2695,18 +2708,21 @@ async function handleContainerOrProcessAction(button: HTMLButtonElement) {
       pendingContainers.set(containerID, 'starting')
       renderServices()
       await api.startContainer(containerID)
+      setOptimisticContainerStatus(containerID, 'running')
     } else if (button.dataset.restartContainer) {
       if (!(await api.confirmDialog(t('Restart container'), t('Restart this container?')))) return
       closeContainerTerminalIfOpen(containerID)
       pendingContainers.set(containerID, 'restarting')
       renderServices()
       await api.restartContainer(containerID)
+      setOptimisticContainerStatus(containerID, 'running')
     } else if (button.dataset.stopContainer) {
       if (!(await api.confirmDialog(t('Stop container'), t('Stop this container?')))) return
       closeContainerTerminalIfOpen(containerID)
       pendingContainers.set(containerID, 'stopping')
       renderServices()
       await api.stopContainer(containerID)
+      setOptimisticContainerStatus(containerID, 'stopped')
     } else {
       processPID = Number(button.dataset.stopPid || 0)
       if (pendingProcessStops.has(processPID)) return
@@ -2731,8 +2747,20 @@ async function handleContainerOrProcessAction(button: HTMLButtonElement) {
   }
   if (processPID) pendingProcessStops.delete(processPID)
   if (containerID) pendingContainers.delete(containerID)
+  // Render the optimistic status right away instead of leaving the row
+  // showing its pre-action state until the full runtime rescan below
+  // (Docker ps + health checks across every service) finishes.
+  renderServices()
   await refreshRuntime()
   if (processPID && processFromResources) await loadResources()
+}
+
+// Reflects a start/stop/restart result locally so the row shows the right
+// status the instant the action resolves, rather than waiting for the
+// slower full runtime rescan (refreshRuntime) that follows to confirm it.
+function setOptimisticContainerStatus(containerID: string, status: 'running' | 'stopped'): void {
+  const svc = services.find(s => s.container_id === containerID)
+  if (svc) svc.status = status
 }
 
 async function handleDocumentChange(event: Event) {
@@ -2838,7 +2866,7 @@ async function toggleContainerTerminal(containerId: string): Promise<void> {
   }
 }
 function renderEngineCard(): void {
-  renderRuntimeEngineCard(containerRuntimeStatus, engineActionBusy)
+  renderRuntimeEngineCard(containerRuntimeStatus, engineActionBusy, engineActionLabel)
 }
 function renderPorts(): void {
   renderPortsView(ports, searchQuery)

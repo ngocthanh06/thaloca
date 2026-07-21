@@ -1,5 +1,5 @@
 import { api, type CapturesSnapshot } from '../api'
-import { escapeHTML, formatBytes, showError } from '../dom'
+import { escapeHTML, formatBytes, matchesSearch, showError, showSuccess } from '../dom'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { openCaptureEditor } from './captureEditor'
 import { copyToClipboard } from '../clipboard'
@@ -11,6 +11,43 @@ let busy = false
 // path → data URI ('' = generation failed, keep the placeholder glyph)
 const thumbs = new Map<string, string>()
 let thumbsLoading = false
+let searchQuery = ''
+type KindFilter = 'all' | 'image' | 'video'
+let kindFilter: KindFilter = 'all'
+type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'
+let dateFilter: DateFilter = 'all'
+// yyyy-mm-dd, as produced by <input type="date"> — '' means unbounded on
+// that side, so picking just "from" means "from that day onward" and vice
+// versa.
+let customDateFrom = ''
+let customDateTo = ''
+
+// Boundaries are all local-midnight based (not "last 24h") so "Today" means
+// the same thing a screenshot's Finder date does, not a rolling window.
+function matchesDateFilter(modifiedAt: number): boolean {
+  if (dateFilter === 'all') return true
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0)
+  const dayMs = 86400000
+  const ts = modifiedAt * 1000
+  switch (dateFilter) {
+    case 'today': return ts >= startOfToday.getTime()
+    case 'yesterday': return ts >= startOfToday.getTime() - dayMs && ts < startOfToday.getTime()
+    case 'week': return ts >= startOfToday.getTime() - 6 * dayMs
+    case 'month': return ts >= startOfToday.getTime() - 29 * dayMs
+    case 'custom': {
+      if (customDateFrom && ts < new Date(`${customDateFrom}T00:00:00`).getTime()) return false
+      if (customDateTo && ts >= new Date(`${customDateTo}T00:00:00`).getTime() + dayMs) return false
+      return true
+    }
+  }
+}
+
+function visibleCaptures(state: CapturesSnapshot): CapturesSnapshot['captures'] {
+  return state.captures.filter(capture =>
+    (kindFilter === 'all' || capture.kind === kindFilter) &&
+    matchesDateFilter(capture.modified_at) &&
+    matchesSearch(searchQuery, capture.name))
+}
 
 function emptySnapshot(): CapturesSnapshot {
   return { location: '', dedicated_folder: '', using_dedicated: false, captures: [] }
@@ -58,23 +95,57 @@ function renderCard(capture: CapturesSnapshot['captures'][number]): string {
     <button class="capture-thumb" data-capture-open="${path}" title="Open">${renderThumb(capture)}</button>
     <div class="capture-copy">${renderName(capture)}<small>${formatBytes(capture.size)} · ${escapeHTML(relativeTime(capture.modified_at))}</small></div>
     <div class="capture-actions">
-      <button class="btn-icon" data-capture-copy="${path}" title="Copy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg></button>
-      ${capture.kind === 'image' ? `<button class="btn-icon" data-capture-ocr="${path}" title="Extract text (OCR)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M8 9h8M8 13h8M8 17h5"/></svg></button>` : ''}
-      <button class="btn-icon" data-capture-edit="${path}" title="${capture.kind === 'video' ? 'Open to trim' : 'Edit'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
-      <button class="btn-icon" data-capture-rename="${path}" title="Rename"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z"/></svg></button>
-      <button class="btn-icon" data-capture-reveal="${path}" title="Show in Finder"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
-      <button class="btn-icon capture-delete" data-capture-delete="${path}" title="Move to Trash"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/></svg></button>
+      <details class="capture-row-menu">
+        <summary class="btn-icon-sm" title="More actions"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></summary>
+        <div class="capture-row-menu-panel">
+          <button data-capture-copy="${path}">Copy</button>
+          ${capture.kind === 'image' ? `<button data-capture-ocr="${path}">Extract text (OCR)</button>` : ''}
+          <button data-capture-edit="${path}">${capture.kind === 'video' ? 'Open to trim' : 'Edit'}</button>
+          <button data-capture-rename="${path}">Rename</button>
+          <button data-capture-reveal="${path}">Show in Finder</button>
+          <button class="danger" data-capture-delete="${path}">Move to Trash</button>
+        </div>
+      </details>
     </div>
   </article>`
+}
+
+function renderKindFilter(): string {
+  const options: { value: KindFilter; label: string }[] = [
+    { value: 'all', label: 'All' }, { value: 'image', label: 'Screenshots' }, { value: 'video', label: 'Recordings' },
+  ]
+  return options.map(o => `<button class="subtab${kindFilter === o.value ? ' active' : ''}" data-capture-filter="${o.value}">${o.label}</button>`).join('')
+}
+
+function renderDateFilter(): string {
+  const options: { value: DateFilter; label: string }[] = [
+    { value: 'all', label: 'Any date' }, { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' },
+    { value: 'week', label: 'Last 7 days' }, { value: 'month', label: 'Last 30 days' }, { value: 'custom', label: 'Custom range…' },
+  ]
+  const select = `<select id="captures-date-filter" class="search-input capture-date-select">
+    ${options.map(o => `<option value="${o.value}" ${dateFilter === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+  </select>`
+  if (dateFilter !== 'custom') return select
+  return `${select}
+    <input id="captures-date-from" class="search-input capture-date-input" type="date" value="${escapeHTML(customDateFrom)}" ${customDateTo ? `max="${escapeHTML(customDateTo)}"` : ''}>
+    <span class="capture-date-sep">–</span>
+    <input id="captures-date-to" class="search-input capture-date-input" type="date" value="${escapeHTML(customDateTo)}" ${customDateFrom ? `min="${escapeHTML(customDateFrom)}"` : ''}>`
 }
 
 function render(): void {
   const container = document.getElementById('captures-content')
   if (!container) return
   const state = snapshot || emptySnapshot()
-  const grid = state.captures.length
-    ? `<div class="captures-grid">${state.captures.map(renderCard).join('')}</div>`
-    : '<div class="captures-empty"><strong>No captures yet</strong><p>Press ⇧⌘4 to take a screenshot or ⇧⌘5 to record the screen — it will show up here within seconds.</p></div>'
+  const filtered = visibleCaptures(state)
+  const filtering = Boolean(searchQuery) || kindFilter !== 'all' || dateFilter !== 'all'
+  let grid: string
+  if (!state.captures.length) {
+    grid = '<div class="captures-empty"><strong>No captures yet</strong><p>Press ⇧⌘4 to take a screenshot or ⇧⌘5 to record the screen — it will show up here within seconds.</p></div>'
+  } else if (!filtered.length) {
+    grid = '<div class="captures-empty"><strong>No captures match</strong><p>Try a different search term or filter.</p></div>'
+  } else {
+    grid = `<div class="captures-grid">${filtered.map(renderCard).join('')}</div>`
+  }
   container.innerHTML = `
     <div class="captures-header">
       <div class="captures-location"><small>Screenshots &amp; recordings are saved to</small><code title="${escapeHTML(state.location)}">${escapeHTML(state.location || '…')}</code>${state.using_dedicated ? '<span class="capture-dedicated-badge">Dedicated folder</span>' : ''}</div>
@@ -85,7 +156,13 @@ function render(): void {
       </div>
     </div>
     ${state.error ? `<div class="captures-error">${escapeHTML(state.error)}</div>` : ''}
-    <div class="captures-count">${state.captures.length} ${state.captures.length === 1 ? 'capture' : 'captures'} · updates automatically</div>
+    ${state.captures.length ? `
+    <div class="captures-toolbar">
+      <input id="captures-search" class="search-input" type="search" placeholder="Search by file name…" value="${escapeHTML(searchQuery)}">
+      <div class="capture-filter-group">${renderKindFilter()}</div>
+      ${renderDateFilter()}
+    </div>` : ''}
+    <div class="captures-count">${filtering ? `${filtered.length} of ${state.captures.length}` : `${state.captures.length}`} ${state.captures.length === 1 && !filtering ? 'capture' : 'captures'} · updates automatically</div>
     ${grid}`
   if (renamingPath) {
     const input = document.getElementById('capture-rename-input') as HTMLInputElement | null
@@ -225,9 +302,34 @@ export function initCapturesView(): void {
     if (event.key === 'Enter') { event.preventDefault(); void commitRename() }
     if (event.key === 'Escape') { renamingPath = null; render() }
   })
+  view?.addEventListener('input', event => {
+    const target = event.target as HTMLElement
+    if (target.id !== 'captures-search') return
+    searchQuery = (target as HTMLInputElement).value
+    render()
+    // Re-rendering replaces the input's own DOM node, so focus/caret need
+    // restoring afterwards — same reason handlePackageSearchInput does.
+    const el = document.getElementById('captures-search') as HTMLInputElement | null
+    if (el) {
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+    }
+  })
+  view?.addEventListener('change', event => {
+    const target = event.target as HTMLElement
+    if (target.id === 'captures-date-filter') {
+      dateFilter = (target as HTMLSelectElement).value as DateFilter
+      render()
+      return
+    }
+    if (target.id === 'captures-date-from') { customDateFrom = (target as HTMLInputElement).value; render(); return }
+    if (target.id === 'captures-date-to') { customDateTo = (target as HTMLInputElement).value; render(); return }
+  })
   view?.addEventListener('click', event => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button')
     if (!button) return
+    if (button.closest('.capture-row-menu-panel')) button.closest<HTMLDetailsElement>('details.capture-row-menu')?.removeAttribute('open')
+    if (button.dataset.captureFilter) { kindFilter = button.dataset.captureFilter as KindFilter; render(); return }
     if (button.id === 'captures-refresh') { void loadCapturesView(); return }
     if (button.id === 'captures-use-dedicated') { void useDedicatedFolder(); return }
     if (button.id === 'captures-choose-folder') { void chooseFolder(); return }
@@ -243,7 +345,16 @@ export function initCapturesView(): void {
       void copy(targetPath).catch(error => showError(String(error)))
       return
     }
-    if (button.dataset.captureOcr) { void api.captureOCR(button.dataset.captureOcr).then(text => copyToClipboard(text, 'Capture OCR')).catch(error => showError(String(error))); return }
+    if (button.dataset.captureOcr) {
+      void api.captureOCR(button.dataset.captureOcr)
+        .then(async text => {
+          if (!text.trim()) { showSuccess('OCR không tìm thấy văn bản nào trong ảnh'); return }
+          await copyToClipboard(text, 'Capture OCR')
+          showSuccess('Đã trích xuất văn bản và sao chép vào clipboard')
+        })
+        .catch(error => showError(String(error)))
+      return
+    }
     if (button.dataset.captureEdit) {
       const targetPath = button.dataset.captureEdit
       const capture = snapshot?.captures.find(item => item.path === targetPath)

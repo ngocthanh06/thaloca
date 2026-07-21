@@ -43,6 +43,10 @@ function normalizeRect(x0: number, y0: number, x1: number, y1: number): Bounds {
   return { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) }
 }
 
+function rectsIntersect(a: Bounds, b: Bounds): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
 function distanceToSegment(px: number, py: number, x0: number, y0: number, x1: number, y1: number): number {
   const dx = x1 - x0, dy = y1 - y0
   const lenSq = dx * dx + dy * dy
@@ -131,7 +135,7 @@ export function openCaptureEditor(path: string, name: string): void {
   let tool: Tool = 'select'
   let color = COLORS[0]
   let shapes: Shape[] = []
-  let selectedId: string | null = null
+  let selectedIds: string[] = []
   let previewShape: Shape | null = null
   let pendingSelectionPreview: Bounds | null = null
   let nextId = 1
@@ -149,16 +153,18 @@ export function openCaptureEditor(path: string, name: string): void {
   let dragMode: DragMode | null = null
   let dragOrigin = { x: 0, y: 0 }
   let dragOrigShape: Shape | null = null
+  let dragGroupOrig: Shape[] | null = null
+  let marqueeOrigin: { x: number; y: number } | null = null
   let strokeDragPushed = false
   let fontDragPushed = false
 
-  const selectedShape = (): Shape | undefined => shapes.find(s => s.id === selectedId)
+  const selectedShape = (): Shape | undefined => selectedIds.length === 1 ? shapes.find(s => s.id === selectedIds[0]) : undefined
   const isDirty = () => undoStack.length > 0
 
   const syncHistoryButtons = () => {
     undoButton.disabled = undoStack.length === 0
     redoButton.disabled = redoStack.length === 0
-    deleteButton.disabled = !selectedId
+    deleteButton.disabled = !selectedIds.length
   }
 
   const pushHistory = (includeRaster: boolean) => {
@@ -292,17 +298,20 @@ export function openCaptureEditor(path: string, name: string): void {
       overlayCtx.strokeRect(pendingSelectionPreview.x, pendingSelectionPreview.y, pendingSelectionPreview.w, pendingSelectionPreview.h)
       overlayCtx.restore()
     }
-    const selected = selectedShape()
-    if (selected) {
-      const b = shapeBounds(selected)
+    const selectedShapes = shapes.filter(s => selectedIds.includes(s.id))
+    for (const shape of selectedShapes) {
+      const b = shapeBounds(shape)
       overlayCtx.save()
       overlayCtx.strokeStyle = '#0a84ff'
       overlayCtx.lineWidth = 1.5
       overlayCtx.setLineDash([5, 4])
       overlayCtx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8)
-      overlayCtx.setLineDash([])
+      overlayCtx.restore()
+    }
+    if (selectedShapes.length === 1) {
+      overlayCtx.save()
       overlayCtx.fillStyle = '#0a84ff'
-      for (const handle of handlePositions(selected)) {
+      for (const handle of handlePositions(selectedShapes[0])) {
         overlayCtx.beginPath()
         overlayCtx.arc(handle.x, handle.y, HANDLE_RADIUS, 0, Math.PI * 2)
         overlayCtx.fill()
@@ -341,11 +350,18 @@ export function openCaptureEditor(path: string, name: string): void {
     dragOrigShape = cloneShape(shape)
   }
 
-  const deleteSelected = () => {
-    if (!selectedId) return
+  const startGroupDrag = (group: Shape[], origin: { x: number; y: number }) => {
     pushHistory(false)
-    shapes = shapes.filter(s => s.id !== selectedId)
-    selectedId = null
+    dragMode = 'move'
+    dragOrigin = origin
+    dragGroupOrig = group.map(cloneShape)
+  }
+
+  const deleteSelected = () => {
+    if (!selectedIds.length) return
+    pushHistory(false)
+    shapes = shapes.filter(s => !selectedIds.includes(s.id))
+    selectedIds = []
     renderOverlay()
   }
 
@@ -412,13 +428,13 @@ export function openCaptureEditor(path: string, name: string): void {
     pushHistory(false)
     const shape: TextShape = { id: makeId(), kind: 'text', color, x, y, text: value, fontSize: Number(fontSizeInput.value) }
     shapes.push(shape)
-    selectedId = shape.id
+    selectedIds = [shape.id]
     renderOverlay()
   }
 
   const openTextInput = (x: number, y: number) => {
     if (textInput) commitText(textInput, startX, startY)
-    selectedId = null
+    selectedIds = []
     const input = document.createElement('input')
     input.type = 'text'
     input.className = 'capture-editor-text-input'
@@ -426,7 +442,7 @@ export function openCaptureEditor(path: string, name: string): void {
     input.style.top = `${y * scale}px`
     input.style.color = color
     input.style.fontSize = `${Number(fontSizeInput.value) * scale}px`
-    canvasWrap.appendChild(input)
+    stage.appendChild(input)
     textInput = input
     startX = x
     startY = y
@@ -448,15 +464,23 @@ export function openCaptureEditor(path: string, name: string): void {
         if (handle) { overlay.setPointerCapture(event.pointerId); startDrag(handle, selected, pt); return }
       }
       const hit = hitTest(pt.x, pt.y)
-      if (hit) { selectedId = hit.id; overlay.setPointerCapture(event.pointerId); startDrag('move', hit, pt); renderOverlay(); return }
-      selectedId = null
+      if (hit) {
+        if (!selectedIds.includes(hit.id)) selectedIds = [hit.id]
+        overlay.setPointerCapture(event.pointerId)
+        startGroupDrag(shapes.filter(s => selectedIds.includes(s.id)), pt)
+        renderOverlay()
+        return
+      }
+      selectedIds = []
+      marqueeOrigin = pt
+      overlay.setPointerCapture(event.pointerId)
       renderOverlay()
       return
     }
 
-    if (tool === 'text') { openTextInput(pt.x, pt.y); return }
+    if (tool === 'text') { event.preventDefault(); openTextInput(pt.x, pt.y); return }
 
-    selectedId = null
+    selectedIds = []
     drawing = true
     overlay.setPointerCapture(event.pointerId)
     startX = pt.x
@@ -467,7 +491,7 @@ export function openCaptureEditor(path: string, name: string): void {
       const shape: PenShape = { id: makeId(), kind: 'pen', color, strokeWidth: Number(strokeInput.value), points: [pt] }
       shapes.push(shape)
       previewShape = null
-      selectedId = shape.id
+      selectedIds = [shape.id]
     }
     renderOverlay()
   })
@@ -475,17 +499,33 @@ export function openCaptureEditor(path: string, name: string): void {
   overlay.addEventListener('pointermove', event => {
     const pt = toCanvasPoint(event)
 
+    if (dragMode === 'move' && dragGroupOrig) {
+      const dx = pt.x - dragOrigin.x
+      const dy = pt.y - dragOrigin.y
+      for (const orig of dragGroupOrig) {
+        const live = shapes.find(s => s.id === orig.id)
+        if (live) applyTranslate(live, orig, dx, dy)
+      }
+      renderOverlay()
+      return
+    }
+
     if (dragMode && dragOrigShape) {
       const dx = pt.x - dragOrigin.x
       const dy = pt.y - dragOrigin.y
       const live = selectedShape()
       if (!live) return
-      if (dragMode === 'move') applyTranslate(live, dragOrigShape, dx, dy)
-      else if (dragMode === 'arrow-a' && live.kind === 'arrow' && dragOrigShape.kind === 'arrow') { live.x0 = dragOrigShape.x0 + dx; live.y0 = dragOrigShape.y0 + dy }
+      if (dragMode === 'arrow-a' && live.kind === 'arrow' && dragOrigShape.kind === 'arrow') { live.x0 = dragOrigShape.x0 + dx; live.y0 = dragOrigShape.y0 + dy }
       else if (dragMode === 'arrow-b' && live.kind === 'arrow' && dragOrigShape.kind === 'arrow') { live.x1 = dragOrigShape.x1 + dx; live.y1 = dragOrigShape.y1 + dy }
       else if (dragMode.startsWith('resize-') && (live.kind === 'rect' || live.kind === 'ellipse' || live.kind === 'highlight') && dragOrigShape.kind === live.kind) {
         applyResize(live, dragOrigShape, dragMode.slice('resize-'.length) as 'nw' | 'ne' | 'sw' | 'se', dx, dy)
       }
+      renderOverlay()
+      return
+    }
+
+    if (marqueeOrigin) {
+      pendingSelectionPreview = normalizeRect(marqueeOrigin.x, marqueeOrigin.y, pt.x, pt.y)
       renderOverlay()
       return
     }
@@ -515,7 +555,19 @@ export function openCaptureEditor(path: string, name: string): void {
   })
 
   overlay.addEventListener('pointerup', event => {
+    if (dragMode === 'move' && dragGroupOrig) { dragMode = null; dragGroupOrig = null; renderOverlay(); return }
     if (dragMode) { dragMode = null; dragOrigShape = null; renderOverlay(); return }
+
+    if (marqueeOrigin) {
+      const pt = toCanvasPoint(event)
+      const r = normalizeRect(marqueeOrigin.x, marqueeOrigin.y, pt.x, pt.y)
+      marqueeOrigin = null
+      pendingSelectionPreview = null
+      if (r.w >= 3 || r.h >= 3) selectedIds = shapes.filter(s => rectsIntersect(shapeBounds(s), r)).map(s => s.id)
+      renderOverlay()
+      return
+    }
+
     if (!drawing) return
     drawing = false
     const pt = toCanvasPoint(event)
@@ -556,7 +608,7 @@ export function openCaptureEditor(path: string, name: string): void {
       if (tool === 'arrow' || b.w >= 2 || b.h >= 2) {
         pushHistory(false)
         shapes.push(shape)
-        selectedId = shape.id
+        selectedIds = [shape.id]
       }
     }
     renderOverlay()
@@ -637,7 +689,7 @@ export function openCaptureEditor(path: string, name: string): void {
     to.push(toEntry)
     const entry = from.pop()!
     shapes = entry.shapes.map(cloneShape)
-    selectedId = null
+    selectedIds = []
     if (entry.baseImageData) {
       const data = entry.baseImageData
       if (data.width !== canvas.width || data.height !== canvas.height) {
@@ -691,7 +743,7 @@ export function openCaptureEditor(path: string, name: string): void {
 
   const onKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !textInput) { event.preventDefault(); void close(); return }
-    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId && !textInput && !(document.activeElement instanceof HTMLInputElement)) {
+    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length && !textInput && !(document.activeElement instanceof HTMLInputElement)) {
       event.preventDefault()
       deleteSelected()
     }

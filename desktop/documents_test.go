@@ -97,6 +97,12 @@ func TestDocumentIndexLimitErrorsAreSkipped(t *testing.T) {
 	if !documentIndexLimitError(fmt.Errorf("PDF exceeds the 200 page automatic indexing limit")) {
 		t.Fatal("page limit must be treated as a skipped document")
 	}
+	if !documentIndexLimitError(fmt.Errorf("document creates 1101 chunks, exceeding the 120 chunk automatic indexing limit")) {
+		t.Fatal("chunk count limit must also be recognized as a skipped (retryable-on-Refresh) document")
+	}
+	if !documentIndexLimitError(fmt.Errorf("document creates 1101 chunks; automatic indexing is limited to 120")) {
+		t.Fatal("the older chunk-limit wording (persisted before it was made consistent) must still be recognized so already-skipped documents remain retryable")
+	}
 	if documentIndexLimitError(fmt.Errorf("temporary embedding timeout")) {
 		t.Fatal("temporary failures must remain retryable failures")
 	}
@@ -234,6 +240,34 @@ func TestExtractPPTXKeepsSlideNumbersAndTextOrder(t *testing.T) {
 	}
 	if chunks[0].Text != "Title one\nBody text" || chunks[1].Text != "Second slide" {
 		t.Fatalf("unexpected PPTX text: %+v", chunks)
+	}
+}
+
+func TestExtractPPTXWithLimitUnlimitedSentinelBypassesSlideCap(t *testing.T) {
+	var data bytes.Buffer
+	archive := zip.NewWriter(&data)
+	for _, name := range []string{"ppt/slides/slide1.xml", "ppt/slides/slide2.xml", "ppt/slides/slide3.xml"} {
+		file, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(`<p:sld xmlns:p="p" xmlns:a="a"><a:p><a:r><a:t>slide</a:t></a:r></a:p></p:sld>`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := extractPPTXWithLimit(data.Bytes(), 2); err == nil {
+		t.Fatal("expected a 2-slide cap to reject a 3-slide deck")
+	}
+	chunks, err := extractPPTXWithLimit(data.Bytes(), documentLimitUnlimited)
+	if err != nil {
+		t.Fatalf("documentLimitUnlimited should bypass the slide cap: %v", err)
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("expected all 3 slides, got %d", len(chunks))
 	}
 }
 

@@ -40,6 +40,10 @@ const (
 	maxDocumentFileBytes     = 20 << 20
 	maxDocumentPDFPages      = 200
 	maxDocumentPPTXSlides    = 150
+	// documentLimitUnlimited is passed as maxPages/maxSlides to bypass the
+	// page/slide count cap entirely (DocumentsUnlimitedEnabled) — distinct
+	// from 0, which still means "unset, use the default above".
+	documentLimitUnlimited = -1
 	maxDocumentIndexChunks   = 120
 	// Office files are ZIP containers; cap the XML selected for extraction
 	// independently of compressed file size to reject highly-compressed ZIP
@@ -831,6 +835,7 @@ func (a *App) refreshDocuments(ctx context.Context, retryFailed bool) (DocumentS
 	work := []pendingDocumentIndex{}
 	cancelled := false
 	productPrefs := loadProductPreferences()
+	unlimitedSize := loadUserSettings().DocumentsUnlimitedEnabled
 	for _, root := range library.Roots {
 		rootPolicy := productPrefs.DocumentPolicies[root.Path]
 		if rootPolicy.Mode == "" {
@@ -898,7 +903,11 @@ func (a *App) refreshDocuments(ctx context.Context, retryFailed bool) (DocumentS
 			if hadOld {
 				doc.Tags, doc.ContentHash, doc.IndexStatus, doc.IndexedAt, doc.Error, doc.ChunkCount = old.Tags, old.ContentHash, old.IndexStatus, old.IndexedAt, old.Error, old.ChunkCount
 				unchanged := old.Size == doc.Size && old.ModifiedAt == doc.ModifiedAt
-				if unchanged && (old.IndexStatus == "indexed" || old.IndexStatus == "skipped" || (!retryFailed && old.IndexStatus == "failed" && !transientDocumentIndexError(old.Error))) {
+				// A limit-skip is worth retrying on an explicit Refresh:
+				// the size/page/slide caps it hit may have just changed
+				// (e.g. the user turned on "no limit" in Documents).
+				retryableSkip := retryFailed && old.IndexStatus == "skipped" && documentIndexLimitMessage(old.Error)
+				if unchanged && !retryableSkip && (old.IndexStatus == "indexed" || old.IndexStatus == "skipped" || (!retryFailed && old.IndexStatus == "failed" && !transientDocumentIndexError(old.Error))) {
 					found[path] = true
 					next = append(next, doc)
 					return nil
@@ -915,13 +924,17 @@ func (a *App) refreshDocuments(ctx context.Context, retryFailed bool) (DocumentS
 			if maxBytes <= 0 {
 				maxBytes = maxDocumentFileBytes
 			}
-			if info.Size() > maxBytes {
+			if !unlimitedSize && info.Size() > maxBytes {
 				doc.IndexStatus, doc.Error = "skipped", fmt.Sprintf("file exceeds the %d MB automatic indexing limit", maxBytes>>20)
 				found[path] = true
 				next = append(next, doc)
 				return nil
 			}
-			chunks, hash, extractErr := extractDocumentWithLimits(path, ext, rootPolicy.MaxPages, rootPolicy.MaxSlides)
+			maxPages, maxSlides := rootPolicy.MaxPages, rootPolicy.MaxSlides
+			if unlimitedSize {
+				maxPages, maxSlides = documentLimitUnlimited, documentLimitUnlimited
+			}
+			chunks, hash, extractErr := extractDocumentWithLimits(path, ext, maxPages, maxSlides)
 			if extractErr != nil {
 				if documentIndexLimitError(extractErr) {
 					doc.IndexStatus, doc.Error = "skipped", extractErr.Error()
@@ -933,8 +946,8 @@ func (a *App) refreshDocuments(ctx context.Context, retryFailed bool) (DocumentS
 				next = append(next, doc)
 				return nil
 			}
-			if len(chunks) > maxDocumentIndexChunks {
-				doc.IndexStatus, doc.Error = "skipped", fmt.Sprintf("document creates %d chunks; automatic indexing is limited to %d", len(chunks), maxDocumentIndexChunks)
+			if !unlimitedSize && len(chunks) > maxDocumentIndexChunks {
+				doc.IndexStatus, doc.Error = "skipped", fmt.Sprintf("document creates %d chunks, exceeding the %d chunk automatic indexing limit", len(chunks), maxDocumentIndexChunks)
 				found[path] = true
 				next = append(next, doc)
 				return nil
@@ -2252,6 +2265,37 @@ func (a *App) RevealDocument(path string) error {
 	}
 	return exec.Command("open", "-R", path).Run()
 }
+// GetDocumentsOCREnabled reports whether image-only PDF pages get an OCR
+// fallback (via Vision) during Documents indexing.
+func (a *App) GetDocumentsOCREnabled() bool {
+	return loadUserSettings().DocumentsOCREnabled
+}
+
+// SetDocumentsOCREnabled turns the OCR fallback on or off. Turning it on
+// does not retroactively re-scan already-failed PDFs on its own — the
+// background poll only retries "failed" documents on the next explicit
+// Refresh (or app restart), not on its once-a-minute automatic pass.
+func (a *App) SetDocumentsOCREnabled(enabled bool) error {
+	settings := loadUserSettings()
+	settings.DocumentsOCREnabled = enabled
+	return saveUserSettings(settings)
+}
+
+// GetDocumentsUnlimitedEnabled reports whether the automatic indexing
+// page/slide-count and file-size caps are bypassed for every folder.
+func (a *App) GetDocumentsUnlimitedEnabled() bool {
+	return loadUserSettings().DocumentsUnlimitedEnabled
+}
+
+// SetDocumentsUnlimitedEnabled turns that bypass on or off. Same retry
+// caveat as SetDocumentsOCREnabled: previously "skipped" documents are
+// only re-evaluated on an explicit Refresh (or app restart).
+func (a *App) SetDocumentsUnlimitedEnabled(enabled bool) error {
+	settings := loadUserSettings()
+	settings.DocumentsUnlimitedEnabled = enabled
+	return saveUserSettings(settings)
+}
+
 func managedDocumentPath(path string) bool {
 	documentLibraryMu.Lock()
 	defer documentLibraryMu.Unlock()
@@ -2269,23 +2313,28 @@ func extractDocument(path, ext string) ([]DocumentChunk, string, error) {
 
 func extractDocumentWithLimits(path, ext string, maxPages, maxSlides int) ([]DocumentChunk, string, error) {
 	// PDFKit reads PDFs directly from disk. Hash them as a stream instead of
-	// loading another full copy into RAM first; the 50 MB file limit remains
-	// the outer safety bound enforced by the scanner.
+	// loading another full copy into RAM first; the file-size cap (skipped
+	// entirely when DocumentsUnlimitedEnabled is on) is enforced by the
+	// caller before this is ever reached.
 	if ext == ".pdf" {
 		hash, err := hashDocumentFile(path)
 		if err != nil {
 			return nil, "", err
 		}
-		if maxPages <= 0 {
+		if maxPages == 0 {
 			maxPages = maxDocumentPDFPages
 		}
-		pages, err := extractPDFPages(path, maxPages)
+		ocrEnabled := loadUserSettings().DocumentsOCREnabled
+		pages, err := extractPDFPages(path, maxPages, ocrEnabled)
 		if err != nil {
 			return nil, "", err
 		}
 		chunks := chunkPages(pages)
 		if len(chunks) == 0 {
-			return nil, "", fmt.Errorf("PDF contains no extractable text; OCR is not enabled")
+			if ocrEnabled {
+				return nil, "", fmt.Errorf("PDF contains no extractable text — OCR found no text on any page")
+			}
+			return nil, "", fmt.Errorf("PDF contains no extractable text; enable OCR for image-only PDFs in Documents")
 		}
 		return chunks, hash, nil
 	}
@@ -2319,8 +2368,17 @@ func documentIndexLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "indexing limit") || strings.Contains(message, "automatic indexing limit")
+	return documentIndexLimitMessage(err.Error())
+}
+
+func documentIndexLimitMessage(message string) bool {
+	message = strings.ToLower(message)
+	// "is limited to" matches the chunk-count skip message's older wording
+	// ("... automatic indexing is limited to N") — still recognized so
+	// documents already persisted with that exact text (from before the
+	// wording was made consistent with the other limit messages) are still
+	// retried on an explicit Refresh, not stuck "skipped" forever.
+	return strings.Contains(message, "indexing limit") || strings.Contains(message, "automatic indexing limit") || strings.Contains(message, "is limited to")
 }
 
 func hashDocumentFile(path string) (string, error) {
@@ -2479,10 +2537,10 @@ func extractPPTXWithLimit(data []byte, maxSlides int) ([]DocumentChunk, error) {
 		return nil, fmt.Errorf("PPTX contains no slides")
 	}
 	sort.Slice(slides, func(i, j int) bool { return slides[i].number < slides[j].number })
-	if maxSlides <= 0 {
+	if maxSlides == 0 {
 		maxSlides = maxDocumentPPTXSlides
 	}
-	if len(slides) > maxSlides {
+	if maxSlides > 0 && len(slides) > maxSlides {
 		return nil, fmt.Errorf("PPTX exceeds the %d slide automatic indexing limit", maxSlides)
 	}
 	chunks := []DocumentChunk{}

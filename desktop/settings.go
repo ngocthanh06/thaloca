@@ -29,6 +29,22 @@ type userSettings struct {
 	// — it captures copies made in ANY app, not just Thaloca, so it defaults
 	// to on (existing behavior) but must be possible to turn off entirely.
 	ClipboardHistoryEnabled bool `json:"clipboard_history_enabled"`
+	// AutoUpdateEnabled gates checkForUpdateLoop (updates.go) installing a
+	// newer release automatically. Off by default: PerformSelfUpdate quits
+	// and restarts the app immediately, which should never happen without
+	// the user opting in first.
+	AutoUpdateEnabled bool `json:"auto_update_enabled"`
+	// DocumentsOCREnabled gates OCR fallback for image-only PDF pages
+	// (documentPDF_darwin.go) during Documents indexing. Off by default:
+	// OCR adds real per-page latency to the scan loop, so it should only
+	// run for users who actually have scanned/screenshot PDFs to index.
+	DocumentsOCREnabled bool `json:"documents_ocr_enabled"`
+	// DocumentsUnlimitedEnabled bypasses the automatic indexing page/slide
+	// count, file size, and chunk count caps (documents.go) for every
+	// managed folder. Off by default — those caps exist to keep the
+	// once-a-minute background scan fast; a very large or very long
+	// document can noticeably slow it down once this is on.
+	DocumentsUnlimitedEnabled bool `json:"documents_unlimited_size_enabled"`
 }
 
 func defaultUserSettings() userSettings {

@@ -44,6 +44,39 @@ test('keeps search available but defers Answer from passages to a later phase', 
   await expect(page.locator('#document-refresh')).toBeEnabled()
 })
 
+test('Scan settings toggles OCR and unlimited size directly from Documents', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => { ;(window as any).__documentSnapshot = snapshot }, connectedSnapshot)
+  await page.goto('/')
+  await page.evaluate(() => document.getElementById('splash-screen')?.remove())
+  await page.evaluate(() => {
+    const app = (window as any).go.main.App
+    app.GetDocumentsOCREnabled = async () => false
+    app.GetDocumentsUnlimitedEnabled = async () => false
+    app.SetDocumentsOCREnabled = async (enabled: boolean) => { (window as any).__calls.push({ name: 'SetDocumentsOCREnabled', args: [enabled] }) }
+    app.SetDocumentsUnlimitedEnabled = async (enabled: boolean) => { (window as any).__calls.push({ name: 'SetDocumentsUnlimitedEnabled', args: [enabled] }) }
+  })
+  await page.click('.nav-btn[data-view="documents"]')
+
+  await expect(page.locator('#document-scan-settings-root')).not.toHaveClass(/open/)
+  await page.click('#document-scan-settings-btn')
+  await expect(page.locator('#document-scan-settings-root')).toHaveClass(/open/)
+  await expect(page.locator('[data-setting-documents-ocr]')).not.toBeChecked()
+  await expect(page.locator('[data-setting-documents-unlimited]')).not.toBeChecked()
+  await expect(page.getByText('Some PDFs (like a full-page website screenshot saved as PDF)')).toBeVisible()
+  await expect(page.getByText('Removes the default 200 page / 150 slide / 20 MB / 120 chunk automatic indexing caps')).toBeVisible()
+
+  await page.locator('[data-setting-documents-ocr]').check()
+  await page.locator('[data-setting-documents-unlimited]').check()
+
+  const calls = await page.evaluate(() => (window as any).__calls)
+  expect(calls).toContainEqual({ name: 'SetDocumentsOCREnabled', args: [true] })
+  expect(calls).toContainEqual({ name: 'SetDocumentsUnlimitedEnabled', args: [true] })
+
+  await page.click('[data-document-scan-settings-close]')
+  await expect(page.locator('#document-scan-settings-root')).not.toHaveClass(/open/)
+})
+
 test('managed folder can be given a friendly name without changing its path', async ({ page }) => {
   await installMockApp(page)
   await page.addInitScript(snapshot => { ;(window as any).__documentSnapshot = snapshot }, connectedSnapshot)
@@ -126,6 +159,21 @@ test('indexing status is read-only and retry failed reuses the safe scan path', 
   await expect(page.locator('.document-index-safety')).toContainText('Existing indexed data is preserved')
   await expect(page.locator('.document-row-reason.failed')).toContainText('Why failed: temporary embedding timeout')
   await page.locator('#document-retry-failed').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'RefreshDocuments').length)).toBe(1)
+})
+
+test('skipped files can be retried after raising or removing the limit that skipped them', async ({ page }) => {
+  await installMockApp(page)
+  await page.addInitScript(snapshot => {
+    ;(window as any).__documentSnapshot = {
+      ...snapshot,
+      documents: [{ id: 'large', root: '/docs', path: '/docs/large.pdf', relative_path: 'large.pdf', name: 'large.pdf', file_type: 'pdf', size: 25_000_000, modified_at: 2, tags: [], index_status: 'skipped', error: 'file exceeds the 20 MB automatic indexing limit', chunk_count: 0 }],
+    }
+  }, connectedSnapshot)
+  await openDocuments(page)
+  await page.locator('.document-scan-exceptions summary', { hasText: 'skipped files' }).click()
+  await expect(page.locator('#document-retry-skipped')).toBeVisible()
+  await page.locator('#document-retry-skipped').click()
   await expect.poll(() => page.evaluate(() => (window as any).__calls.filter((call: any) => call.name === 'RefreshDocuments').length)).toBe(1)
 })
 

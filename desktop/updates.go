@@ -13,7 +13,7 @@ import (
 // desktop/frontend/package.json's "version") together when cutting a
 // release. There's no build-time version-injection set up, so it's a
 // plain constant kept in sync by hand.
-const AppVersion = "0.1.8"
+const AppVersion = "0.1.9"
 
 // updateRepo is the GitHub repo releases are checked against. Hardcoded
 // like the embedded GitHub OAuth client ID elsewhere in this app — it's
@@ -115,11 +115,24 @@ func isNewerVersion(latest, current string) bool {
 func (a *App) checkForUpdateLoop() {
 	check := func() {
 		info := a.CheckForUpdate()
-		if info.Available {
-			a.notifyOnce("update:"+info.LatestVersion, "update_available",
-				"Update available",
-				fmt.Sprintf("Thaloca %s is available (you have %s).", info.LatestVersion, info.CurrentVersion))
+		if !info.Available {
+			return
 		}
+		if a.GetAutoUpdateEnabled() {
+			a.notifyOnce("update-installing:"+info.LatestVersion, "update_available",
+				"Installing update",
+				fmt.Sprintf("Thaloca %s is downloading and will restart automatically.", info.LatestVersion))
+			if err := a.PerformSelfUpdate(info.LatestVersion); err == nil {
+				return
+			}
+			// Auto-update failed (network, verification, a newer release
+			// appeared mid-download, …) — fall through to the manual
+			// notification below so the user isn't left unaware a newer
+			// version exists.
+		}
+		a.notifyOnce("update-available:"+info.LatestVersion, "update_available",
+			"Update available",
+			fmt.Sprintf("Thaloca %s is available (you have %s).", info.LatestVersion, info.CurrentVersion))
 	}
 	check()
 	ticker := time.NewTicker(24 * time.Hour)
@@ -127,4 +140,17 @@ func (a *App) checkForUpdateLoop() {
 	for range ticker.C {
 		check()
 	}
+}
+
+// GetAutoUpdateEnabled reports whether checkForUpdateLoop is allowed to
+// install a newer release automatically instead of only notifying.
+func (a *App) GetAutoUpdateEnabled() bool {
+	return loadUserSettings().AutoUpdateEnabled
+}
+
+// SetAutoUpdateEnabled turns fully-automatic updates on or off.
+func (a *App) SetAutoUpdateEnabled(enabled bool) error {
+	settings := loadUserSettings()
+	settings.AutoUpdateEnabled = enabled
+	return saveUserSettings(settings)
 }

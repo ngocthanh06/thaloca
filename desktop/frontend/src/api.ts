@@ -920,6 +920,12 @@ interface WailsApp {
   GetAppVersion(): Promise<string>
   CheckForUpdate(): Promise<Partial<UpdateInfo>>
   PerformSelfUpdate(expectedVersion: string): Promise<void>
+  GetAutoUpdateEnabled(): Promise<boolean>
+  SetAutoUpdateEnabled(enabled: boolean): Promise<void>
+  GetDocumentsOCREnabled(): Promise<boolean>
+  SetDocumentsOCREnabled(enabled: boolean): Promise<void>
+  GetDocumentsUnlimitedEnabled(): Promise<boolean>
+  SetDocumentsUnlimitedEnabled(enabled: boolean): Promise<void>
   OpenInstalledApp(path: string): Promise<void>
   QuitInstalledApp(bundleId: string): Promise<void>
   DeleteInstalledApp(path: string): Promise<void>
@@ -1184,6 +1190,12 @@ export const api = {
     const fn = wailsApp()?.PerformSelfUpdate
     return fn ? fn(expectedVersion) : Promise.reject(new Error('Wails runtime not available'))
   },
+  getAutoUpdateEnabled: (): Promise<boolean> => wailsApp()?.GetAutoUpdateEnabled?.() || Promise.resolve(false),
+  setAutoUpdateEnabled: (enabled: boolean): Promise<void> => wailsApp()?.SetAutoUpdateEnabled?.(enabled) || Promise.resolve(),
+  getDocumentsOCREnabled: (): Promise<boolean> => wailsApp()?.GetDocumentsOCREnabled?.() || Promise.resolve(false),
+  setDocumentsOCREnabled: (enabled: boolean): Promise<void> => wailsApp()?.SetDocumentsOCREnabled?.(enabled) || Promise.resolve(),
+  getDocumentsUnlimitedEnabled: (): Promise<boolean> => wailsApp()?.GetDocumentsUnlimitedEnabled?.() || Promise.resolve(false),
+  setDocumentsUnlimitedEnabled: (enabled: boolean): Promise<void> => wailsApp()?.SetDocumentsUnlimitedEnabled?.(enabled) || Promise.resolve(),
   refreshInstalledApps: (): Promise<InstalledApp[]> => wailsApp()?.RefreshInstalledApps?.() || Promise.resolve([]),
   openInstalledApp: (path: string): Promise<void> => {
     const fn = wailsApp()?.OpenInstalledApp

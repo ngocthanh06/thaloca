@@ -115,9 +115,15 @@ export function GetActivity(arg1:boolean):Promise<main.ActivitySummary>;
 
 export function GetAppVersion():Promise<string>;
 
+export function GetAutoUpdateEnabled():Promise<boolean>;
+
 export function GetClipboardHistoryEnabled():Promise<boolean>;
 
 export function GetContainerRuntimeStatus():Promise<main.ContainerRuntimeStatus>;
+
+export function GetDocumentsOCREnabled():Promise<boolean>;
+
+export function GetDocumentsUnlimitedEnabled():Promise<boolean>;
 
 export function GetEnvFileContent(arg1:string,arg2:string):Promise<string>;
 
@@ -371,11 +377,17 @@ export function ServerContainerLogs(arg1:string,arg2:string):Promise<string>;
 
 export function ServerVPNStatus(arg1:string):Promise<main.VPNStatus>;
 
+export function SetAutoUpdateEnabled(arg1:boolean):Promise<void>;
+
 export function SetCaptureFolder(arg1:string):Promise<main.CapturesSnapshot>;
 
 export function SetClipboardHistoryEnabled(arg1:boolean):Promise<void>;
 
 export function SetDocumentRootPolicy(arg1:string,arg2:main.DocumentRootPolicy):Promise<main.ProductPreferences>;
+
+export function SetDocumentsOCREnabled(arg1:boolean):Promise<void>;
+
+export function SetDocumentsUnlimitedEnabled(arg1:boolean):Promise<void>;
 
 export function SetGitHubClientID(arg1:string):Promise<void>;
 

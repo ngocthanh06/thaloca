@@ -66,6 +66,95 @@ test('renders the capture grid with names, sizes and location', async ({ page })
   await expect(page.locator('#captures-use-dedicated')).toBeVisible()
 })
 
+test('search filters the capture grid by file name', async ({ page }) => {
+  await openCaptures(page)
+  await expect(page.locator('.capture-card')).toHaveCount(2)
+  await page.locator('#captures-search').fill('recording')
+  await expect(page.locator('.capture-card')).toHaveCount(1)
+  await expect(page.locator('.capture-card')).toContainText('Recording B.mov')
+  await expect(page.locator('.captures-count')).toContainText('1 of 2')
+  await page.locator('#captures-search').fill('')
+  await expect(page.locator('.capture-card')).toHaveCount(2)
+})
+
+test('kind filter buttons show only screenshots or recordings', async ({ page }) => {
+  await openCaptures(page)
+  await page.locator('[data-capture-filter="image"]').click()
+  await expect(page.locator('.capture-card')).toHaveCount(1)
+  await expect(page.locator('.capture-card')).toContainText('Screenshot A.png')
+  await page.locator('[data-capture-filter="video"]').click()
+  await expect(page.locator('.capture-card')).toHaveCount(1)
+  await expect(page.locator('.capture-card')).toContainText('Recording B.mov')
+  await page.locator('[data-capture-filter="all"]').click()
+  await expect(page.locator('.capture-card')).toHaveCount(2)
+})
+
+test('date filter buttons narrow the grid to today, yesterday, or older captures', async ({ page }) => {
+  const now = new Date()
+  const dayAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); d.setHours(12, 0, 0, 0); return d.getTime() / 1000 }
+  const snapshot = {
+    location: '/Users/test/Desktop',
+    dedicated_folder: '/Users/test/Pictures/Thaloca Captures',
+    using_dedicated: false,
+    captures: [
+      { path: '/Users/test/Desktop/Today.png', name: 'Today.png', kind: 'image', size: 1024, modified_at: dayAgo(0) },
+      { path: '/Users/test/Desktop/Yesterday.png', name: 'Yesterday.png', kind: 'image', size: 1024, modified_at: dayAgo(1) },
+      { path: '/Users/test/Desktop/LastWeek.png', name: 'LastWeek.png', kind: 'image', size: 1024, modified_at: dayAgo(5) },
+      { path: '/Users/test/Desktop/LastMonth.png', name: 'LastMonth.png', kind: 'image', size: 1024, modified_at: dayAgo(20) },
+      { path: '/Users/test/Desktop/Ancient.png', name: 'Ancient.png', kind: 'image', size: 1024, modified_at: dayAgo(60) },
+    ],
+  }
+  await openCaptures(page, snapshot)
+  await expect(page.locator('.capture-card')).toHaveCount(5)
+
+  await page.locator('#captures-date-filter').selectOption('today')
+  await expect(page.locator('.capture-card')).toHaveCount(1)
+  await expect(page.locator('.capture-card')).toContainText('Today.png')
+
+  await page.locator('#captures-date-filter').selectOption('yesterday')
+  await expect(page.locator('.capture-card')).toHaveCount(1)
+  await expect(page.locator('.capture-card')).toContainText('Yesterday.png')
+
+  await page.locator('#captures-date-filter').selectOption('week')
+  await expect(page.locator('.capture-card')).toHaveCount(3)
+
+  await page.locator('#captures-date-filter').selectOption('month')
+  await expect(page.locator('.capture-card')).toHaveCount(4)
+
+  await page.locator('#captures-date-filter').selectOption('all')
+  await expect(page.locator('.capture-card')).toHaveCount(5)
+})
+
+test('custom date range reveals two date pickers and filters between them', async ({ page }) => {
+  const now = new Date()
+  const dayAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); d.setHours(12, 0, 0, 0); return d }
+  const isoDay = (d: Date) => d.toISOString().slice(0, 10)
+  const snapshot = {
+    location: '/Users/test/Desktop',
+    dedicated_folder: '/Users/test/Pictures/Thaloca Captures',
+    using_dedicated: false,
+    captures: [
+      { path: '/Users/test/Desktop/Today.png', name: 'Today.png', kind: 'image', size: 1024, modified_at: dayAgo(0).getTime() / 1000 },
+      { path: '/Users/test/Desktop/LastWeek.png', name: 'LastWeek.png', kind: 'image', size: 1024, modified_at: dayAgo(5).getTime() / 1000 },
+      { path: '/Users/test/Desktop/LastMonth.png', name: 'LastMonth.png', kind: 'image', size: 1024, modified_at: dayAgo(20).getTime() / 1000 },
+      { path: '/Users/test/Desktop/Ancient.png', name: 'Ancient.png', kind: 'image', size: 1024, modified_at: dayAgo(60).getTime() / 1000 },
+    ],
+  }
+  await openCaptures(page, snapshot)
+
+  await expect(page.locator('#captures-date-from')).toHaveCount(0)
+  await page.locator('#captures-date-filter').selectOption('custom')
+  await expect(page.locator('#captures-date-from')).toBeVisible()
+  await expect(page.locator('#captures-date-to')).toBeVisible()
+
+  // Covers LastWeek and LastMonth but excludes Today and Ancient.
+  await page.locator('#captures-date-from').fill(isoDay(dayAgo(25)))
+  await page.locator('#captures-date-to').fill(isoDay(dayAgo(3)))
+  await expect(page.locator('.capture-card')).toHaveCount(2)
+  await expect(page.locator('.capture-card').nth(0)).toContainText('LastWeek.png')
+  await expect(page.locator('.capture-card').nth(1)).toContainText('LastMonth.png')
+})
+
 test('open, reveal and edit call the backend with the file path', async ({ page }) => {
   await openCaptures(page)
   await page.locator('[data-capture-open="/Users/test/Desktop/Screenshot A.png"]').click()

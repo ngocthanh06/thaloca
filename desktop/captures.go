@@ -538,8 +538,16 @@ func (a *App) DeleteCapture(path string) (CapturesSnapshot, error) {
 	// Pass the path as argv rather than interpolating it into AppleScript, so
 	// quotes, backslashes and other valid filename characters stay data and
 	// can never alter the script.
+	//
+	// The POSIX file coercion must happen in a plain "set" statement before
+	// the "tell" block: resolving it inline as an argument to a Finder
+	// command (e.g. "tell application \"Finder\" to delete POSIX file (item
+	// 1 of argv)") sends the unresolved expression to Finder itself, which
+	// fails with "Can't get POSIX file ... (-1728)" even when the file
+	// exists.
 	script := `on run argv
-tell application "Finder" to delete POSIX file (item 1 of argv)
+set targetFile to POSIX file (item 1 of argv)
+tell application "Finder" to delete targetFile
 end run`
 	out, err := exec.CommandContext(ctx, "osascript", "-e", script, path).CombinedOutput()
 	if err != nil {

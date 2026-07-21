@@ -29,6 +29,8 @@ let resultFindQuery = ''
 let resultFindIndex = 0
 let editingRootPath = ''
 let editingRootName = ''
+let ocrEnabled = false
+let unlimitedEnabled = false
 
 function scanETA(progress: DocumentScanProgress): string {
   const processed = progress.indexed + progress.failed
@@ -177,6 +179,20 @@ function renderSearchModeControl(): string {
 
 function rootDefaultName(path: string): string { return path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path }
 
+function renderScanSettingsModal(): string {
+  return `<div class="settings-box">
+    <header><h2>${t('Scan settings')}</h2><button class="btn-secondary" data-document-scan-settings-close>${t('Close')}</button></header>
+    <section class="settings-section">
+      <label class="settings-checkbox"><input type="checkbox" data-setting-documents-ocr ${ocrEnabled ? 'checked' : ''}> ${t('Enable OCR for image-only PDFs')}</label>
+      <p class="resource-detail muted">${t('Some PDFs (like a full-page website screenshot saved as PDF) have no real text layer, so Thaloca cannot index them by default. Turning this on runs on-device OCR (the same recognizer as Captures\' "Extract text") on image-only pages during indexing. This adds real time per page, so large scanned PDFs will index more slowly.')}</p>
+    </section>
+    <section class="settings-section">
+      <label class="settings-checkbox"><input type="checkbox" data-setting-documents-unlimited ${unlimitedEnabled ? 'checked' : ''}> ${t('No page/size limit')}</label>
+      <p class="resource-detail muted">${t('Removes the default 200 page / 150 slide / 20 MB / 120 chunk automatic indexing caps for every folder. A very large or very long document will noticeably slow down scanning once this is on.')}</p>
+    </section>
+  </div>`
+}
+
 function renderRoots(state: DocumentSnapshot): string {
   if (!state.roots.length) return `<div class="documents-empty-small">${t('Add a folder to discover PDF, PPTX, DOCX, TXT and Markdown files. Images, scanned PDFs and empty files are skipped.')}</div>`
   return state.roots.map(root => {
@@ -275,7 +291,7 @@ function renderDocumentFailures(state: DocumentSnapshot): string {
   const skipped = state.documents.filter(doc => doc.index_status === 'skipped')
   const excluded = state.excluded_paths || []
   if (!failed.length && !skipped.length && !excluded.length) return ''
-  return `<div class="document-scan-exceptions">${failed.length ? `<details open><summary><span>${failed.length} ${t('failed files')}</span><button id="document-retry-failed" class="btn-secondary" ${state.scanning ? 'disabled' : ''}>${t('Retry failed')}</button></summary>${failed.map(doc => `<div><span title="${escapeHTML(doc.path)}"><strong>${escapeHTML(doc.name)}</strong><small><b>${t('Why failed:')}</b> ${escapeHTML(doc.error || t('Indexing failed'))}</small></span><button class="btn-secondary" data-document-exclude="${escapeHTML(doc.path)}">${t('Exclude from scans')}</button></div>`).join('')}</details>` : ''}${skipped.length ? `<details><summary>${skipped.length} ${t('skipped files')}</summary>${skipped.map(doc => `<div><span title="${escapeHTML(doc.path)}"><strong>${escapeHTML(doc.name)}</strong><small><b>${t('Why skipped:')}</b> ${escapeHTML(doc.error || t('Skipped by automatic indexing limits'))}</small></span><button class="btn-secondary" data-document-preview="${escapeHTML(doc.path)}">${t('Preview')}</button></div>`).join('')}</details>` : ''}${excluded.length ? `<details><summary>${excluded.length} ${t('excluded files')}</summary>${excluded.map(path => `<div><span title="${escapeHTML(path)}"><strong>${escapeHTML(path.split('/').pop() || path)}</strong><small><b>${t('Why excluded:')}</b> ${t('Manually excluded from automatic scans')} · ${escapeHTML(path)}</small></span><button class="btn-secondary" data-document-restore="${escapeHTML(path)}">${t('Restore')}</button></div>`).join('')}</details>` : ''}</div>`
+  return `<div class="document-scan-exceptions">${failed.length ? `<details open><summary><span>${failed.length} ${t('failed files')}</span><button id="document-retry-failed" class="btn-secondary" ${state.scanning ? 'disabled' : ''}>${t('Retry failed')}</button></summary>${failed.map(doc => `<div><span title="${escapeHTML(doc.path)}"><strong>${escapeHTML(doc.name)}</strong><small><b>${t('Why failed:')}</b> ${escapeHTML(doc.error || t('Indexing failed'))}</small></span><button class="btn-secondary" data-document-exclude="${escapeHTML(doc.path)}">${t('Exclude from scans')}</button></div>`).join('')}</details>` : ''}${skipped.length ? `<details><summary><span>${skipped.length} ${t('skipped files')}</span><button id="document-retry-skipped" class="btn-secondary" ${state.scanning ? 'disabled' : ''}>${t('Retry skipped')}</button></summary>${skipped.map(doc => `<div><span title="${escapeHTML(doc.path)}"><strong>${escapeHTML(doc.name)}</strong><small><b>${t('Why skipped:')}</b> ${escapeHTML(doc.error || t('Skipped by automatic indexing limits'))}</small></span><button class="btn-secondary" data-document-preview="${escapeHTML(doc.path)}">${t('Preview')}</button></div>`).join('')}</details>` : ''}${excluded.length ? `<details><summary>${excluded.length} ${t('excluded files')}</summary>${excluded.map(path => `<div><span title="${escapeHTML(path)}"><strong>${escapeHTML(path.split('/').pop() || path)}</strong><small><b>${t('Why excluded:')}</b> ${t('Manually excluded from automatic scans')} · ${escapeHTML(path)}</small></span><button class="btn-secondary" data-document-restore="${escapeHTML(path)}">${t('Restore')}</button></div>`).join('')}</details>` : ''}</div>`
 }
 
 function renderIndexingStatus(state: DocumentSnapshot): string {
@@ -329,7 +345,7 @@ function render(): void {
   const selectionEnd = active?.selectionEnd ?? null
   const state = snapshot || emptySnapshot(); const runtimeAvailable = state.longbrain.healthy && state.longbrain.qdrant_healthy; const available = runtimeAvailable && state.longbrain.embedding_local; const scanning = state.scanning || busy === 'refresh' || busy === 'cancel'
   container.innerHTML = `
-    <div class="documents-hero"><div><h2>${t('Find the exact file and passage')}</h2><p>${t('Original files stay in place. Document indexing and search are provided by LongBrain.')}</p></div><div class="longbrain-health ${available ? 'connected' : 'offline'}"><span></span>${t(available ? 'Index ready' : 'Documents unavailable')}<small>${escapeHTML(t(state.longbrain.message))}</small></div></div>
+    <div class="documents-hero"><div><h2>${t('Find the exact file and passage')}</h2><p>${t('Original files stay in place. Document indexing and search are provided by LongBrain.')}</p></div><div class="documents-hero-status"><button id="document-scan-settings-btn" class="btn-icon" title="${t('Scan settings')}" aria-label="${t('Scan settings')}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><div class="longbrain-health ${available ? 'connected' : 'offline'}"><span></span>${t(available ? 'Index ready' : 'Documents unavailable')}<small>${escapeHTML(t(state.longbrain.message))}</small></div></div></div>
     ${runtimeAvailable ? '' : `<div class="longbrain-install-card"><div class="longbrain-install-copy"><strong>${t('Install or start LongBrain to use Documents')}</strong><p>${t('Adding folders, scanning and semantic search stay locked until LongBrain and Qdrant are ready. Requires Docker Desktop.')}</p><div class="longbrain-install-command"><code>${escapeHTML(longbrainInstallCommand)}</code><button id="document-copy-install" class="btn-secondary">${t(installCommandCopied ? 'Copied' : 'Copy')}</button></div><small>${t('Guide')}: <code>${escapeHTML(state.longbrain.install_url || 'https://longbrain.cc.cd')}</code></small></div><div class="longbrain-install-actions"><button id="document-install-longbrain" class="primary">${t('Open install guide')}</button></div></div>`}
     <form id="document-search-form" class="document-search-box ${available ? '' : 'locked'}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>${renderSearchModeControl()}<input id="document-query" type="search" value="${escapeHTML(searchQuery)}" placeholder="${t(available ? (searchMode === 'semantic' ? 'Search by meaning, or ask a full question…' : 'Search exact text, or ask a full question…') : 'LongBrain document service is unavailable')}" title="${t('Search documents')}" autocomplete="off" ${available ? '' : 'disabled'}><button class="btn-secondary" type="submit" ${!available || busy ? 'disabled' : ''}>${t('Search passages')}</button></form>
     ${renderResultFind()}<div id="document-search-results">${renderResults(available)}</div>
@@ -343,7 +359,17 @@ function render(): void {
   applyResultFind()
 }
 
-export async function loadDocumentsView(): Promise<void> { try { [snapshot, documentPreferences] = await Promise.all([api.documentLibrary(), api.productPreferences()]) } catch (error) { snapshot = emptySnapshot(); showError(String(error)) }; render() }
+export async function loadDocumentsView(): Promise<void> {
+  try {
+    [snapshot, documentPreferences, ocrEnabled, unlimitedEnabled] = await Promise.all([
+      api.documentLibrary(), api.productPreferences(), api.getDocumentsOCREnabled(), api.getDocumentsUnlimitedEnabled(),
+    ])
+  } catch (error) {
+    snapshot = emptySnapshot()
+    showError(String(error))
+  }
+  render()
+}
 async function addFolder(): Promise<void> { try { const path = await api.pickDocumentFolder(); if (!path) return; snapshot = await api.addDocumentFolder(path); render() } catch (error) { showError(String(error)) } }
 async function removeFolder(path: string): Promise<void> {
   if (!(await api.confirmDialog('Remove document folder', `Stop managing ${path}? Original files will not be deleted.`))) return
@@ -385,9 +411,63 @@ async function cancelScan(): Promise<void> { try { busy = 'cancel'; render(); aw
 async function runQuery(): Promise<void> { const query = searchQuery.trim(); if (!query) return; try { busy = 'search'; lastQuery = query; lastSearchMode = searchMode; resultVisibleLimit = 8; resultFileType = 'all'; results = []; answer = null; render(); results = searchMode === 'semantic' ? await api.semanticSearchDocuments(query) : await api.searchDocuments(query) } catch (error) { showError(String(error)) } finally { busy = ''; render() } }
 async function answerFromResults(): Promise<void> { const query = lastQuery.trim(); if (!query || !results.length) return; try { busy = 'ask'; answer = null; render(); answer = await api.askDocumentPassages(query, results.slice(0, 6)) } catch (error) { showError(String(error)) } finally { busy = ''; render() } }
 
+async function handleOCRToggle(enabled: boolean): Promise<void> {
+  ocrEnabled = enabled
+  try {
+    await api.setDocumentsOCREnabled(enabled)
+  } catch (error) {
+    ocrEnabled = !enabled
+    renderScanSettingsRoot()
+    showError(`${t('Could not save setting:')} ${String(error)}`)
+  }
+}
+
+async function handleUnlimitedToggle(enabled: boolean): Promise<void> {
+  unlimitedEnabled = enabled
+  try {
+    await api.setDocumentsUnlimitedEnabled(enabled)
+  } catch (error) {
+    unlimitedEnabled = !enabled
+    renderScanSettingsRoot()
+    showError(`${t('Could not save setting:')} ${String(error)}`)
+  }
+}
+
+function renderScanSettingsRoot(): void {
+  const root = document.getElementById('document-scan-settings-root')
+  if (root) root.innerHTML = renderScanSettingsModal()
+}
+
+function initScanSettingsModal(): void {
+  if (document.getElementById('document-scan-settings-root')) return
+  const root = document.createElement('div')
+  root.id = 'document-scan-settings-root'
+  root.className = 'settings-overlay'
+  document.body.appendChild(root)
+  root.addEventListener('mousedown', event => { if (event.target === root) closeScanSettingsModal() })
+  root.addEventListener('click', event => {
+    if ((event.target as HTMLElement).closest('[data-document-scan-settings-close]')) closeScanSettingsModal()
+  })
+  root.addEventListener('change', event => {
+    const input = event.target as HTMLInputElement
+    if (input.matches('[data-setting-documents-ocr]')) { void handleOCRToggle(input.checked); return }
+    if (input.matches('[data-setting-documents-unlimited]')) { void handleUnlimitedToggle(input.checked); return }
+  })
+}
+
+function openScanSettingsModal(): void {
+  renderScanSettingsRoot()
+  document.getElementById('document-scan-settings-root')?.classList.add('open')
+}
+
+function closeScanSettingsModal(): void {
+  document.getElementById('document-scan-settings-root')?.classList.remove('open')
+}
+
 export function initDocumentsView(): void {
   if (initialized) return; initialized = true; const view = document.getElementById('documents-view')
-  document.addEventListener(LOCALE_CHANGE_EVENT, render)
+  initScanSettingsModal()
+  document.addEventListener(LOCALE_CHANGE_EVENT, () => { render(); renderScanSettingsRoot() })
   document.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLocaleLowerCase() !== 'f' || !view?.classList.contains('active')) return
     event.preventDefault()
@@ -410,7 +490,7 @@ export function initDocumentsView(): void {
     if (button.dataset.documentFind === 'previous') { applyResultFind(-1); return }
     if (button.dataset.documentFind === 'next') { applyResultFind(1); return }
     if (button.id === 'document-copy-install') { void copyToClipboard(longbrainInstallCommand, 'LongBrain install command').then(() => { installCommandCopied = true; render() }).catch(error => showError(String(error))); return }
-    if (button.id === 'document-add-folder') { void addFolder(); return }; if (button.id === 'document-refresh' || button.id === 'document-results-scan' || button.id === 'document-retry-failed') { void refresh(); return }; if (button.id === 'document-cancel-scan') { void cancelScan(); return }; if (button.id === 'document-load-more') { documentVisibleLimit += 100; updateDocumentRows(); return }; if (button.id === 'document-results-more') { resultVisibleLimit += 8; render(); return }; if (button.id === 'document-clear-results') { results = []; answer = null; lastQuery = ''; resultFileType = 'all'; render(); return }; if (button.id === 'document-answer-results') { void answerFromResults(); return }; if (button.dataset.documentSearchMode === 'exact' || button.dataset.documentSearchMode === 'semantic') { searchMode = button.dataset.documentSearchMode; render(); return }; if (button.dataset.documentResultType) { resultFileType = button.dataset.documentResultType; resultVisibleLimit = 8; render(); return }
+    if (button.id === 'document-scan-settings-btn') { openScanSettingsModal(); return }; if (button.id === 'document-add-folder') { void addFolder(); return }; if (button.id === 'document-refresh' || button.id === 'document-results-scan' || button.id === 'document-retry-failed' || button.id === 'document-retry-skipped') { void refresh(); return }; if (button.id === 'document-cancel-scan') { void cancelScan(); return }; if (button.id === 'document-load-more') { documentVisibleLimit += 100; updateDocumentRows(); return }; if (button.id === 'document-results-more') { resultVisibleLimit += 8; render(); return }; if (button.id === 'document-clear-results') { results = []; answer = null; lastQuery = ''; resultFileType = 'all'; render(); return }; if (button.id === 'document-answer-results') { void answerFromResults(); return }; if (button.dataset.documentSearchMode === 'exact' || button.dataset.documentSearchMode === 'semantic') { searchMode = button.dataset.documentSearchMode; render(); return }; if (button.dataset.documentResultType) { resultFileType = button.dataset.documentResultType; resultVisibleLimit = 8; render(); return }
     if (button.dataset.documentFolder) { documentFolderExpansion.set(button.dataset.documentFolder, button.getAttribute('aria-expanded') !== 'true'); updateDocumentRows(); return }
     if (button.dataset.documentRenameRoot) { editingRootPath = button.dataset.documentRenameRoot; editingRootName = button.dataset.documentRootCurrentName || rootDefaultName(editingRootPath); render(); requestAnimationFrame(() => { const input = document.querySelector<HTMLInputElement>(`[data-document-root-name="${CSS.escape(editingRootPath)}"]`); input?.focus(); input?.select() }); return }
     if (button.hasAttribute('data-document-root-cancel')) { editingRootPath = ''; editingRootName = ''; render(); return }

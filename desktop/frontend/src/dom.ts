@@ -115,3 +115,10 @@ export function showError(message: string): void {
   banner.classList.add('visible')
   setTimeout(() => banner.classList.remove('visible'), 5000)
 }
+
+export function showSuccess(message: string): void {
+  const banner = document.getElementById('success-banner')!
+  banner.textContent = message
+  banner.classList.add('visible')
+  setTimeout(() => banner.classList.remove('visible'), 3000)
+}

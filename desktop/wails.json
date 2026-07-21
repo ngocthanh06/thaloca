@@ -11,7 +11,7 @@
   },
   "info": {
     "productName": "Thaloca",
-    "productVersion": "0.1.8"
+    "productVersion": "0.1.9"
   },
   "wailsjsdir": "frontend",
   "output": "build/bin",

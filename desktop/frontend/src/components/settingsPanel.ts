@@ -25,6 +25,7 @@ let checkingForUpdate = false
 let selfUpdating = false
 let selfUpdateError = ''
 let clipboardHistoryEnabled = true
+let autoUpdateEnabled = false
 // Which shortcut field is currently listening for a key combo, if any —
 // see renderShortcutRow/bindShortcutRows below.
 let recordingShortcutId: string | null = null
@@ -43,14 +44,19 @@ export function initSettingsPanel(): void {
 
 export async function openSettingsPanel(): Promise<void> {
   initSettingsPanel()
-  const [settings, version, clipboardEnabled] = await Promise.all([
-    api.getNotificationSettings(), api.getAppVersion(), api.getClipboardHistoryEnabled(),
+  const [settings, version, clipboardEnabled, autoUpdate] = await Promise.all([
+    api.getNotificationSettings(), api.getAppVersion(), api.getClipboardHistoryEnabled(), api.getAutoUpdateEnabled(),
   ])
   current = { ...current, ...settings }
   appVersion = version
   clipboardHistoryEnabled = clipboardEnabled
+  autoUpdateEnabled = autoUpdate
   render()
   document.getElementById('settings-root')?.classList.add('open')
+  // Check for updates the moment Settings opens, so "Update now" is already
+  // there if one is available instead of making the user press "Check for
+  // updates" first.
+  void handleCheckForUpdate()
 }
 
 export function closeSettingsPanel(): void {
@@ -110,6 +116,7 @@ function render(): void {
       <section class="settings-section">
         <h3>${t('Updates')}</h3>
         <p class="resource-detail muted">${t('Version')} ${appVersion ? escapeHTML(appVersion) : '—'}. ${t('"Update now" checks GitHub\'s SHA-256 and the app bundle before installing and restarting. This build is not Developer ID signed or notarized.')}</p>
+        <label class="settings-checkbox"><input type="checkbox" data-setting-auto-update ${autoUpdateEnabled ? 'checked' : ''}> ${t('Automatically install updates when found (quits and restarts Thaloca without asking)')}</label>
         <div class="settings-buttons">
           <button class="btn-secondary" data-settings-check-update ${checkingForUpdate ? 'disabled' : ''}>${checkingForUpdate ? t('Checking…') : t('Check for updates')}</button>
         </div>
@@ -124,6 +131,9 @@ function render(): void {
   })
   root.querySelector<HTMLInputElement>('[data-setting-clipboard-history]')?.addEventListener('change', event => {
     void handleClipboardHistoryToggle((event.target as HTMLInputElement).checked)
+  })
+  root.querySelector<HTMLInputElement>('[data-setting-auto-update]')?.addEventListener('change', event => {
+    void handleAutoUpdateToggle((event.target as HTMLInputElement).checked)
   })
   root.querySelectorAll<HTMLButtonElement>('[data-settings-lang]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -239,6 +249,19 @@ async function handleClipboardHistoryToggle(enabled: boolean): Promise<void> {
   try {
     await api.setClipboardHistoryEnabled(enabled)
   } catch (error) {
+    clipboardHistoryEnabled = !enabled
+    render()
+    showError(`${t('Could not save setting:')} ${String(error)}`)
+  }
+}
+
+async function handleAutoUpdateToggle(enabled: boolean): Promise<void> {
+  autoUpdateEnabled = enabled
+  try {
+    await api.setAutoUpdateEnabled(enabled)
+  } catch (error) {
+    autoUpdateEnabled = !enabled
+    render()
     showError(`${t('Could not save setting:')} ${String(error)}`)
   }
 }
