@@ -5180,6 +5180,17 @@ select.search-input {
   flex-wrap: wrap;
 }
 
+.container-row-menu { position: relative; }
+.container-row-menu[open] > summary { border-color: var(--accent); color: var(--accent); }
+.container-row-menu-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; display: flex; flex-direction: column; min-width: 150px; max-height: 240px; overflow-y: auto; border: 1px solid var(--border-light); background: var(--bg-elevated); border-radius: var(--radius-sm); box-shadow: 0 8px 24px var(--shadow); }
+.container-row-menu-panel button { border: 0; background: transparent; color: var(--fg); text-align: left; padding: 8px 12px; font-size: 12.5px; cursor: pointer; }
+.container-row-menu-panel button:hover { background: var(--bg-card); }
+.container-row-menu-panel button.danger { color: var(--danger); }
+/* .project-group clips overflow to keep its rounded corners — a menu
+   opening downward from the last row in a group would render past that
+   clip and get cut off, so the last row's menu opens upward instead. */
+.container-row:last-child .container-row-menu-panel { top: auto; bottom: calc(100% + 4px); }
+
 .container-row .row-log {
   grid-column: 1 / -1;
   margin: 6px 0 2px;

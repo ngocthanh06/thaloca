@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { installMockApp } from './mockApp'
 
-test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page }) => {
+test('sidebar shows every nav item and Runtime has all 7 subtabs', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', e => errors.push(e.message))
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
@@ -27,7 +27,7 @@ test('sidebar shows every nav item and Runtime has all 4 subtabs', async ({ page
 
   await page.click('.nav-btn[data-view="runtime"]')
   const subtabLabels = await page.locator('#services-subtabs .subtab').allTextContents()
-  expect(subtabLabels.map(s => s.replace(/\s+\d+$/, ''))).toEqual(['Containers', 'Processes', 'Ports', 'Jobs'])
+  expect(subtabLabels.map(s => s.replace(/\s+\d+$/, ''))).toEqual(['Containers', 'Processes', 'Ports', 'Jobs', 'Volumes', 'Networks', 'Images'])
 
   await page.click('#services-subtabs .subtab[data-subtab="jobs"]')
   await expect(page.locator('#subview-jobs')).toHaveClass(/active/)

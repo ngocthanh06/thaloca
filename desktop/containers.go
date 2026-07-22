@@ -156,6 +156,31 @@ func (a *App) RestartContainer(containerID string) error {
 	return nil
 }
 
+// RemoveContainer stops (if running) and permanently removes a single
+// container, mirroring ComposeDown's semantics but for one container
+// instead of a whole compose project. engine is the Docker context this
+// container was listed from (Service.Engine) — ScanDocker merges
+// containers from every context, so without --context this would fail
+// with "no such container" whenever that context isn't the active one.
+func (a *App) RemoveContainer(containerID, engine string) error {
+	containerID = strings.TrimSpace(containerID)
+	if containerID == "" {
+		return fmt.Errorf("container id is empty")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "docker", dockerContextArgs(engine, "rm", "-f", containerID)...).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("docker rm: %s", message)
+	}
+	a.addEvent("action", "container "+discovery.ShortID(containerID), "", "container", containerID, "removed", "Container "+discovery.ShortID(containerID)+" removed")
+	return nil
+}
+
 // ComposeDown stops and removes every container of a compose project.
 func (a *App) ComposeDown(project string) error {
 	project = strings.TrimSpace(project)

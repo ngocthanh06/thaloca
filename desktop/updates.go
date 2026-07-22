@@ -9,11 +9,15 @@ import (
 	"time"
 )
 
-// AppVersion is Thaloca's own version — bump this (and
-// desktop/frontend/package.json's "version") together when cutting a
-// release. There's no build-time version-injection set up, so it's a
-// plain constant kept in sync by hand.
-const AppVersion = "0.1.9"
+// AppVersion is Thaloca's own version — bump this, desktop/frontend/
+// package.json's "version", AND desktop/wails.json's "productVersion"
+// together when cutting a release. The last one is easy to miss since it
+// only ever shows up as a self-update failure ("update bundle version
+// does not match release") — it's what Wails bakes into the packaged
+// .app's Info.plist at build time, separate from this Go constant. There's
+// no build-time version-injection set up, so all three are plain values
+// kept in sync by hand.
+const AppVersion = "0.1.10"
 
 // updateRepo is the GitHub repo releases are checked against. Hardcoded
 // like the embedded GitHub OAuth client ID elsewhere in this app — it's

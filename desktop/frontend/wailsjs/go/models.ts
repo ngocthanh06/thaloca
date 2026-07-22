@@ -27,6 +27,74 @@ export namespace cron {
 
 export namespace discovery {
 	
+	export class DockerImage {
+	    id: string;
+	    repository: string;
+	    tag: string;
+	    size: string;
+	    created: string;
+	    in_use: boolean;
+	    engine?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DockerImage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.repository = source["repository"];
+	        this.tag = source["tag"];
+	        this.size = source["size"];
+	        this.created = source["created"];
+	        this.in_use = source["in_use"];
+	        this.engine = source["engine"];
+	    }
+	}
+	export class DockerNetwork {
+	    id: string;
+	    name: string;
+	    driver: string;
+	    scope: string;
+	    in_use: boolean;
+	    engine?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DockerNetwork(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.driver = source["driver"];
+	        this.scope = source["scope"];
+	        this.in_use = source["in_use"];
+	        this.engine = source["engine"];
+	    }
+	}
+	export class DockerVolume {
+	    name: string;
+	    driver: string;
+	    mountpoint: string;
+	    scope: string;
+	    in_use: boolean;
+	    engine?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DockerVolume(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.driver = source["driver"];
+	        this.mountpoint = source["mountpoint"];
+	        this.scope = source["scope"];
+	        this.in_use = source["in_use"];
+	        this.engine = source["engine"];
+	    }
+	}
 	export class Service {
 	    id: string;
 	    name: string;

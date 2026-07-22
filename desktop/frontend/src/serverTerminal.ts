@@ -281,11 +281,17 @@ function acceptSuggestion(session: ActiveTerminal, command: string): void {
 // mount point, since the surrounding view stamps its innerHTML from scratch
 // on every state change. A no-op if there's no active session for
 // `serverId`, or if it's already attached to this exact element.
-export function reattachServerTerminal(serverId: string, mountEl: HTMLElement): void {
+// hadFocus must be captured by the caller BEFORE it replaces the
+// surrounding view's innerHTML (see main.ts's renderServers) — see
+// containerTerminal.ts's reattachContainerTerminal for why this can't be
+// checked from inside this function instead.
+export function reattachServerTerminal(serverId: string, mountEl: HTMLElement, hadFocus = false): void {
   if (!active || active.serverId !== serverId || active.closed) return
-  if (active.wrapper.parentElement === mountEl) return
-  mountEl.appendChild(active.wrapper)
-  active.resizeObserver.disconnect()
-  active.resizeObserver = observeResize(active, mountEl)
-  active.fitAddon.fit()
+  if (active.wrapper.parentElement !== mountEl) {
+    mountEl.appendChild(active.wrapper)
+    active.resizeObserver.disconnect()
+    active.resizeObserver = observeResize(active, mountEl)
+    active.fitAddon.fit()
+  }
+  if (hadFocus) active.term.focus()
 }

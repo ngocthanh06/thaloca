@@ -17,6 +17,7 @@ import { wireResourceHistoryHover, type HistoryWindow } from './components/resou
 import { renderToolsView, renderPackagesView, type ToolActionState, type PackageRegistryKey } from './views/tools'
 import { initEnvFilesView } from './views/envFiles'
 import { initConfigFilesView } from './views/configFiles'
+import { initVolumesView, initNetworksView, initImagesView } from './views/dockerResources'
 import {
   renderServersView, type ServerTerminalState, type ServerContainersState, type ServerCronState,
   type ServerFilesState, type ServerBulkRunState, type ServerBulkRunJobStatus, type ServerVPNPanelState,
@@ -299,6 +300,9 @@ function renderApp() {
             <button class="subtab" data-subtab="processes">${t('Processes')} <span class="subtab-count" id="count-processes"></span></button>
             <button class="subtab" data-subtab="ports">${t('Ports')} <span class="subtab-count" id="count-ports"></span></button>
             <button class="subtab" data-subtab="jobs">${t('Jobs')} <span class="subtab-count" id="count-jobs"></span></button>
+            <button class="subtab" data-subtab="volumes">${t('Volumes')}</button>
+            <button class="subtab" data-subtab="networks">${t('Networks')}</button>
+            <button class="subtab" data-subtab="images">${t('Images')}</button>
           </nav>
           <div id="subview-docker" class="subview active">
             <p class="subview-desc">${t('Containers grouped by Docker Compose project. Click a project to expand it; start or stop one container or the whole project.')}</p>
@@ -315,6 +319,18 @@ function renderApp() {
           <div id="subview-jobs" class="subview">
             <p class="subview-desc">${t('Background jobs from Docker workers, cron, launchd, and PM2.')}</p>
             <div id="jobs-list" class="jobs-list"></div>
+          </div>
+          <div id="subview-volumes" class="subview">
+            <p class="subview-desc">${t('Docker volumes on this machine. Removing one is refused by Docker while a container still uses it.')}</p>
+            <div id="volumes-content"></div>
+          </div>
+          <div id="subview-networks" class="subview">
+            <p class="subview-desc">${t('Docker networks on this machine. Removing one is refused by Docker while a container is still attached.')}</p>
+            <div id="networks-content"></div>
+          </div>
+          <div id="subview-images" class="subview">
+            <p class="subview-desc">${t('Docker images on this machine, including untagged ones. Removing one is refused by Docker while a container still depends on it.')}</p>
+            <div id="images-content"></div>
           </div>
         </section>
 
@@ -538,6 +554,9 @@ function applyLocaleToShell(): void {
   setSubtabLabel('#services-subtabs .subtab[data-subtab="processes"]', t('Processes'))
   setSubtabLabel('#services-subtabs .subtab[data-subtab="ports"]', t('Ports'))
   setSubtabLabel('#services-subtabs .subtab[data-subtab="jobs"]', t('Jobs'))
+  setSubtabLabel('#services-subtabs .subtab[data-subtab="volumes"]', t('Volumes'))
+  setSubtabLabel('#services-subtabs .subtab[data-subtab="networks"]', t('Networks'))
+  setSubtabLabel('#services-subtabs .subtab[data-subtab="images"]', t('Images'))
   setText('#subview-docker > .subview-desc', t('Containers grouped by Docker Compose project. Click a project to expand it; start or stop one container or the whole project.'))
   setText('#subview-processes > .subview-desc', t('Programs running directly on this Mac (outside Docker) that are listening on a TCP port — dev servers, tools, system services.'))
   setText('#subview-ports > .subview-desc', t('Every local TCP port currently in use and which process or container owns it.'))
@@ -876,6 +895,11 @@ async function loadServers(): Promise<void> {
 }
 
 function renderServers(): void {
+  // See renderServices' matching comment: this must be read before
+  // renderServersView replaces the view's innerHTML, since that detach
+  // blurs the terminal's hidden input immediately.
+  const focusedMount = document.activeElement?.closest<HTMLElement>('[data-server-terminal-mount]')
+  const hadFocus = !!focusedMount && focusedMount.getAttribute('data-server-terminal-mount') === serverTerminal?.serverId
   renderServersView({
     servers, checks: serverChecks, keyWarnings: serverKeyWarnings, containers: serverContainers, cron: serverCron,
     files: serverFiles, vpn: serverVPN, terminal: serverTerminal, showAddForm: showAddServerForm, editingServer, sshConfigHosts,
@@ -888,7 +912,7 @@ function renderServers(): void {
   if (serverTerminal) {
     const mount = document.querySelector<HTMLElement>(`[data-server-terminal-mount="${CSS.escape(serverTerminal.serverId)}"]`)
     const serverId = serverTerminal.serverId
-    if (mount) void loadServerTerminalModule().then(m => m.reattachServerTerminal(serverId, mount))
+    if (mount) void loadServerTerminalModule().then(m => m.reattachServerTerminal(serverId, mount, hadFocus))
   }
 }
 
@@ -1719,6 +1743,12 @@ function bindEvents() {
       document.querySelectorAll('#services-subtabs .subtab, #runtime-view .subview').forEach(el => el.classList.remove('active'))
       btn.classList.add('active')
       document.getElementById(`subview-${btn.getAttribute('data-subtab')}`)!.classList.add('active')
+      // Volumes/Networks/Images are lazily loaded on first visit, same
+      // idiom as Tools' Env Files/Config Files sub-tabs below — they don't
+      // ride along on the 30s Snapshot poll that drives the other four.
+      if (btn.getAttribute('data-subtab') === 'volumes') initVolumesView()
+      if (btn.getAttribute('data-subtab') === 'networks') initNetworksView()
+      if (btn.getAttribute('data-subtab') === 'images') initImagesView()
     })
   })
 
@@ -2052,7 +2082,13 @@ async function handleDocumentClick(event: Event) {
     togglePinRepo(pin.dataset.pinRepo)
     return
   }
-  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-tag-create], [data-tag-checkout], [data-tag-push], [data-tag-delete], [data-tag-delete-remote], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install], [data-open-vpn-settings]')
+  const button = target?.closest<HTMLButtonElement>('[data-overview-goto-runtime], [data-ignore-repo], [data-track-repo], [data-enable-events], [data-disable-events], [data-stop-pid], [data-stop-container], [data-start-container], [data-restart-container], [data-down-container], [data-terminal-container], [data-container-logs], [data-job-logs], [data-project-logs], [data-process-logs], [data-start-project], [data-stop-project], [data-restart-project], [data-down-project], [data-repo-tab], [data-branch-create], [data-branch-switch], [data-branch-merge], [data-branch-delete], [data-tag-create], [data-tag-checkout], [data-tag-push], [data-tag-delete], [data-tag-delete-remote], [data-file-nav], [data-file-open], [data-file-close], [data-file-maximize], [data-pr-view], [data-pr-back], [data-pr-review], [data-pr-state-tab], [data-pr-new-toggle], [data-pr-new-cancel], [data-pr-new-submit], [data-pr-merge], [data-pr-close], [data-pr-reopen], [data-pr-ready], [data-pr-labels-toggle], [data-pr-labels-cancel], [data-pr-labels-save], [data-pr-reviewers-toggle], [data-pr-reviewers-cancel], [data-pr-reviewers-save], [data-pr-assignees-toggle], [data-pr-assignees-cancel], [data-pr-assignees-save], [data-pr-diff-view], [data-pr-detail-tab], [data-pr-select-file], [data-pr-comment-add], [data-pr-comment-cancel], [data-pr-comment-submit], [data-pr-comment-reply], [data-source-repo], [data-stage], [data-unstage], [data-resolve], [data-commit], [data-diff-file], [data-diff-view-toggle], [data-commit-view], [data-commit-back], [data-commit-file], [data-copy-commit-hash], [data-gh-open], [data-gh-cancel], [data-gh-login], [data-gh-logout], [data-gh-save-client], [data-gh-save-token], [data-gh-cli], [data-sync], [data-history-more], [data-graph-more], [data-branch-more], [data-tool-install], [data-tool-update], [data-tool-action-close], [data-package-install], [data-package-uninstall], [data-package-registry], [data-server-add-toggle], [data-server-add-submit], [data-server-check-draft], [data-server-edit-toggle], [data-server-edit-submit], [data-server-edit-cancel], [data-server-remove], [data-server-check], [data-server-terminal-toggle], [data-server-browse-key], [data-open-external], [data-server-fix-key], [data-server-containers-toggle], [data-server-cron-toggle], [data-server-cron-set-enabled], [data-server-cron-remove], [data-server-files-toggle], [data-server-file-nav], [data-server-file-upload], [data-server-file-download], [data-server-vpn-toggle], [data-server-vpn-edit-start], [data-server-vpn-edit-cancel], [data-server-vpn-select-engine], [data-server-vpn-install-engine], [data-server-vpn-save], [data-server-vpn-connect-toggle], [data-server-vpn-remove], [data-server-bulk-run-toggle], [data-server-bulk-run-submit], [data-server-bulk-run-cancel], [data-server-ssh-config-load], [data-security-scan], [data-security-hook-toggle], [data-security-scan-all], [data-security-goto-tools], [data-security-select-all], [data-security-select-none], [data-security-change-selection], [data-security-open-file], [data-security-reveal-file], [data-container-scan-image], [data-server-container-start], [data-server-container-stop], [data-server-container-restart], [data-server-container-logs], [data-resource-sort], [data-open-app], [data-quit-app], [data-delete-app], [data-history-window], [data-engine-start], [data-engine-stop], [data-engine-install], [data-open-folder], [data-open-vscode], [data-open-homebrew-install], [data-open-vpn-settings]')
+  // Container row actions live inside a "..." kebab menu (see
+  // renderContainerRow) — close it before the action below runs, same as
+  // captures.ts's row menu does for its own panel.
+  if (button?.closest('.container-row-menu-panel')) {
+    button.closest<HTMLDetailsElement>('details.container-row-menu')?.removeAttribute('open')
+  }
   if (!button) {
     // Source Control's Repositories tab: clicking a repo expands its recent commits/events
     // inline instead of navigating away — "Open in Source Control" (below)
@@ -2549,6 +2585,24 @@ async function handleDocumentClick(event: Event) {
     return
   }
 
+  if (button.dataset.downContainer) {
+    const containerID = button.dataset.downContainer
+    const engine = button.dataset.engine || ''
+    if (!(await api.confirmDialog(t('Down container'), t('Stop and remove this container? Its data outside mounted volumes will be lost.')))) return
+    closeContainerTerminalIfOpen(containerID)
+    pendingContainers.set(containerID, 'removing')
+    button.disabled = true
+    renderServices()
+    try {
+      await api.removeContainer(containerID, engine)
+    } catch (error) {
+      showError(String(error))
+    }
+    pendingContainers.delete(containerID)
+    await refreshRuntime()
+    return
+  }
+
   if (button.dataset.terminalContainer) {
     await toggleContainerTerminal(button.dataset.terminalContainer)
     return
@@ -2807,6 +2861,14 @@ async function handleDocumentChange(event: Event) {
 // rendering lives in views/runtime.ts (data-in, no closure over this
 // module's state — see that file's header comment).
 function renderServices(): void {
+  // Capture which open container terminal (if any) currently holds focus
+  // BEFORE renderServicesView replaces this view's innerHTML — that
+  // replacement detaches the terminal's hidden input immediately, blurring
+  // it synchronously, so checking activeElement any later (e.g. inside the
+  // reattach call below, which runs on its own microtask) would always see
+  // <body> instead. See containerTerminal.ts's reattachContainerTerminal.
+  const focusedMount = document.activeElement?.closest<HTMLElement>('[data-container-terminal-mount]')
+  const focusedContainerId = focusedMount?.getAttribute('data-container-terminal-mount') || null
   renderServicesView({
     services, ports, jobs, dockerStatus, searchQuery, healthCache, sizeCache: containerSizeCache, pendingContainers, jobLogs, projectLogs,
     processLogs, pendingProjects, imageScans: containerImageScans, terminals: containerTerminals,
@@ -2817,7 +2879,7 @@ function renderServices(): void {
   // instead of losing scrollback to a freshly recreated session.
   for (const containerId of containerTerminals.keys()) {
     const mount = document.querySelector<HTMLElement>(`[data-container-terminal-mount="${CSS.escape(containerId)}"]`)
-    if (mount) void loadContainerTerminalModule().then(m => m.reattachContainerTerminal(containerId, mount))
+    if (mount) void loadContainerTerminalModule().then(m => m.reattachContainerTerminal(containerId, mount, containerId === focusedContainerId))
   }
 }
 

@@ -214,6 +214,34 @@ export interface ConfigFileEntry {
   detected_value?: string
 }
 
+export interface DockerVolume {
+  name: string
+  driver: string
+  mountpoint: string
+  scope: string
+  in_use: boolean
+  engine?: string
+}
+
+export interface DockerNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+  in_use: boolean
+  engine?: string
+}
+
+export interface DockerImage {
+  id: string
+  repository: string
+  tag: string
+  size: string
+  created: string
+  in_use: boolean
+  engine?: string
+}
+
 export interface DeviceCode {
   user_code: string
   verification_uri: string
@@ -1026,6 +1054,7 @@ interface WailsApp {
   RepoFiles(path: string, rel: string): Promise<RepoEntry[]>
   RepoFile(path: string, rel: string): Promise<string>
   RestartContainer(id: string): Promise<void>
+  RemoveContainer(id: string, engine: string): Promise<void>
   ComposeDown(project: string): Promise<void>
   OpenContainerTerminal(id: string): Promise<string>
   ActivateContainerTerminal(sessionId: string): Promise<void>
@@ -1088,6 +1117,12 @@ interface WailsApp {
   ListConfigFiles(): Promise<ConfigFileEntry[]>
   ToggleConfigFile(path: string): Promise<boolean>
   ToggleTelemetry(): Promise<boolean>
+  ListVolumes(): Promise<DockerVolume[]>
+  ListNetworks(): Promise<DockerNetwork[]>
+  ListImages(): Promise<DockerImage[]>
+  RemoveVolume(name: string, engine: string): Promise<void>
+  RemoveNetwork(id: string, engine: string): Promise<void>
+  RemoveImage(id: string, engine: string): Promise<void>
   GetContainerRuntimeStatus(): Promise<ContainerRuntimeStatus>
   StartContainerRuntime(kind: string): Promise<void>
   StopContainerRuntime(kind: string): Promise<void>
@@ -1476,6 +1511,7 @@ export const api = {
   repoFiles: (path: string, rel: string) => wailsApp()?.RepoFiles?.(path, rel) || Promise.resolve([]),
   repoFile: (path: string, rel: string) => wailsApp()?.RepoFile?.(path, rel) || Promise.resolve(''),
   restartContainer: (id: string) => wailsApp()?.RestartContainer?.(id) || Promise.resolve(),
+  removeContainer: (id: string, engine: string) => wailsApp()?.RemoveContainer?.(id, engine) || Promise.resolve(),
   composeDown: (project: string) => wailsApp()?.ComposeDown?.(project) || Promise.resolve(),
   openContainerTerminal: (id: string): Promise<string> => {
     const fn = wailsApp()?.OpenContainerTerminal
@@ -1556,6 +1592,12 @@ export const api = {
   getEnvFileContent: (projectPath: string, fileName: string): Promise<string> =>
     wailsApp()?.GetEnvFileContent?.(projectPath, fileName) || Promise.reject('native not available'),
   listConfigFiles: (): Promise<ConfigFileEntry[]> => wailsApp()?.ListConfigFiles?.() || Promise.resolve([]),
+  listVolumes: (): Promise<DockerVolume[]> => wailsApp()?.ListVolumes?.() || Promise.resolve([]),
+  listNetworks: (): Promise<DockerNetwork[]> => wailsApp()?.ListNetworks?.() || Promise.resolve([]),
+  listImages: (): Promise<DockerImage[]> => wailsApp()?.ListImages?.() || Promise.resolve([]),
+  removeVolume: (name: string, engine: string) => wailsApp()?.RemoveVolume?.(name, engine) || Promise.resolve(),
+  removeNetwork: (id: string, engine: string) => wailsApp()?.RemoveNetwork?.(id, engine) || Promise.resolve(),
+  removeImage: (id: string, engine: string) => wailsApp()?.RemoveImage?.(id, engine) || Promise.resolve(),
   toggleConfigFile: (path: string): Promise<boolean> =>
     wailsApp()?.ToggleConfigFile?.(path) || Promise.reject('native not available'),
   toggleTelemetry: (): Promise<boolean> => wailsApp()?.ToggleTelemetry?.() || Promise.reject('native not available'),

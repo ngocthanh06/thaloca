@@ -173,14 +173,22 @@ export async function openContainerTerminal(
 // since the surrounding view stamps its innerHTML from scratch on every
 // state change. A no-op if there's no active session for containerId, or if
 // it's already attached to this exact element.
-export function reattachContainerTerminal(containerId: string, mountEl: HTMLElement): void {
+// hadFocus must be captured by the caller BEFORE it replaces the
+// surrounding view's innerHTML (see main.ts's renderServices) — that
+// replacement detaches session.wrapper immediately, which blurs its hidden
+// input synchronously, so by the time this function runs on its own
+// microtask document.activeElement has already reverted to <body> and
+// checking it here would always read as "no focus to restore".
+export function reattachContainerTerminal(containerId: string, mountEl: HTMLElement, hadFocus = false): void {
   const session = sessions.get(containerId)
   if (!session || session.closed) return
-  if (session.wrapper.parentElement === mountEl) return
-  mountEl.appendChild(session.wrapper)
-  session.resizeObserver.disconnect()
-  session.resizeObserver = observeResize(session, mountEl)
-  session.fitAddon.fit()
+  if (session.wrapper.parentElement !== mountEl) {
+    mountEl.appendChild(session.wrapper)
+    session.resizeObserver.disconnect()
+    session.resizeObserver = observeResize(session, mountEl)
+    session.fitAddon.fit()
+  }
+  if (hadFocus) session.term.focus()
 }
 
 // Closes every live container terminal session — used when the Runtime tab

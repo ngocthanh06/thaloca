@@ -230,14 +230,20 @@ function renderContainerRow(svc: Service, ctx: RuntimeContext): string {
       <span class="status-badge status-${escapeHTML(stateClass || 'unknown')}">${escapeHTML(state || 'unknown')}</span>
       <span class="row-actions">
         ${pending ? '' : `
-          <button class="repo-action" data-container-logs="${id}">${logs !== undefined ? t('Hide logs') : t('Logs')}</button>
-          ${svc.image ? `<button class="repo-action" data-container-scan-image="${id}" data-image="${image}" ${imageScan === 'scanning' ? 'disabled' : ''}>${imageScan === 'scanning' ? t('Scanning…') : imageScan ? t('Hide scan') : t('Scan image')}</button>` : ''}
-          ${stopped
-            ? `<button class="repo-action" data-start-container="${id}">${t('Start')}</button>`
-            : `
-              <button class="repo-action" data-terminal-container="${id}">${terminal ? t('Hide terminal') : t('Terminal')}</button>
-              <button class="repo-action" data-restart-container="${id}">${t('Restart')}</button>
-              <button class="repo-action danger" data-stop-container="${id}">${t('Stop')}</button>`}`}
+          <details class="container-row-menu">
+            <summary class="btn-icon-sm" title="${t('Actions')}"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></summary>
+            <div class="container-row-menu-panel">
+              <button data-container-logs="${id}">${logs !== undefined ? t('Hide logs') : t('Logs')}</button>
+              ${svc.image ? `<button data-container-scan-image="${id}" data-image="${image}" ${imageScan === 'scanning' ? 'disabled' : ''}>${imageScan === 'scanning' ? t('Scanning…') : imageScan ? t('Hide scan') : t('Scan image')}</button>` : ''}
+              ${stopped
+                ? `<button data-start-container="${id}">${t('Start')}</button>`
+                : `
+                  <button data-terminal-container="${id}">${terminal ? t('Hide terminal') : t('Terminal')}</button>
+                  <button data-restart-container="${id}">${t('Restart')}</button>
+                  <button class="danger" data-stop-container="${id}">${t('Stop')}</button>`}
+              <button class="danger" data-down-container="${id}" data-engine="${escapeHTML(svc.engine || '')}">${t('Down')}</button>
+            </div>
+          </details>`}
       </span>
       ${logs !== undefined ? `<pre class="job-log row-log">${escapeHTML(logs)}</pre>` : ''}
       ${imageScan && imageScan !== 'scanning' ? renderImageScanPanel(svc.image || '', imageScan) : ''}

@@ -366,8 +366,16 @@ export function ListEnvFiles() {
   return window['go']['main']['App']['ListEnvFiles']();
 }
 
+export function ListImages() {
+  return window['go']['main']['App']['ListImages']();
+}
+
 export function ListLanguagePackages(arg1) {
   return window['go']['main']['App']['ListLanguagePackages'](arg1);
+}
+
+export function ListNetworks() {
+  return window['go']['main']['App']['ListNetworks']();
 }
 
 export function ListPullRequestAuthors(arg1) {
@@ -412,6 +420,10 @@ export function ListServers() {
 
 export function ListVPNEngines() {
   return window['go']['main']['App']['ListVPNEngines']();
+}
+
+export function ListVolumes() {
+  return window['go']['main']['App']['ListVolumes']();
 }
 
 export function LoadCaptureImage(arg1) {
@@ -574,8 +586,20 @@ export function RemoveAssignees(arg1, arg2, arg3) {
   return window['go']['main']['App']['RemoveAssignees'](arg1, arg2, arg3);
 }
 
+export function RemoveContainer(arg1, arg2) {
+  return window['go']['main']['App']['RemoveContainer'](arg1, arg2);
+}
+
 export function RemoveDocumentFolder(arg1) {
   return window['go']['main']['App']['RemoveDocumentFolder'](arg1);
+}
+
+export function RemoveImage(arg1, arg2) {
+  return window['go']['main']['App']['RemoveImage'](arg1, arg2);
+}
+
+export function RemoveNetwork(arg1, arg2) {
+  return window['go']['main']['App']['RemoveNetwork'](arg1, arg2);
 }
 
 export function RemoveReviewers(arg1, arg2, arg3) {
@@ -592,6 +616,10 @@ export function RemoveServerCronLine(arg1, arg2) {
 
 export function RemoveServerVPNConfig(arg1) {
   return window['go']['main']['App']['RemoveServerVPNConfig'](arg1);
+}
+
+export function RemoveVolume(arg1, arg2) {
+  return window['go']['main']['App']['RemoveVolume'](arg1, arg2);
 }
 
 export function RenameCapture(arg1, arg2) {
